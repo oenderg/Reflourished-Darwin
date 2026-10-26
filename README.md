@@ -53,8 +53,6 @@ and the mod's own content built in.
   * Drawn at the sharpness of the display it is on; Settings can draw it sharper on a
     display that isn't Retina.
   * `Cmd-M` and `Cmd-H` pause the game.
-  * Closing the window quits, or keeps the game paused if you choose that in Settings.
-    Quitting asks first (Settings, or "Don't ask again", turns that off).
 * **Updates**
   * The Mac app updates itself: it checks once a day and asks before it installs
     (PvZ2 Reflourished > Check for Updates…).
