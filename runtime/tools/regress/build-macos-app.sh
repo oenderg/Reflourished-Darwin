@@ -91,6 +91,7 @@ clang -g -O1 -fobjc-arc -Wall -Wno-unused-function -Wno-deprecated-declarations 
     -framework AudioToolbox -framework Foundation -framework CoreFoundation -framework CoreText \
     -framework CoreGraphics -framework Security -framework QuartzCore -framework Metal \
     -framework IOSurface -framework ImageIO -framework WebKit -framework AppKit \
+    -framework UniformTypeIdentifiers \
     -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework Accelerate \
     -framework Sparkle \
     -o "$APP/Contents/MacOS/PvZ2"
