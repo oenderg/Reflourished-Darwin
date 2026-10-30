@@ -45,12 +45,14 @@
 #include "husk-tl-jni.h"
 #include "husk-tl-ld.h"
 #include "husk-tl-pvz2.h"
+#include "husk-tl-cursor-grid.h"
 #include "husk-tl-cdn.h"
 #include "husk-tl-viewport.h"
 #include "pvz2-keys.h"
 #include "pvz2-open-url.h"
 #include "pvz2-file-picker.h"
 #include "pvz2-badge-style.h"
+#include "pvz2-cursor-art.h"
 
 static bool open_game_url(const char *url)
 {
@@ -69,6 +71,7 @@ static atomic_uint g_packet_hand_generation;
 static double g_packet_hand_x, g_packet_hand_y;
 static void packet_carry_to(double gx, double gy);
 static void cursor_set_game(double gx, double gy);
+static bool pointer_in_game(double *gx, double *gy);
 static NSString *apkPath, *dataPath, *eglPath, *glesPath;
 static const int surfaceWidth = 1748, surfaceHeight = 804;
 
@@ -86,10 +89,12 @@ static char g_apk[1024], g_data[1024], g_egl[1024], g_gles[1024];
  * the mapping from the window to the game is checked. */
 @interface PVZ2View : NSView
 @property(nonatomic, strong) CAMetalLayer *metal;
+@property(nonatomic, strong) NSTrackingArea *cursorTracking;
 - (void)windowTap:(int)phase at:(NSPoint)p;
 - (void)applyPresentation;
 - (void)followDisplayScale;
 - (void)badgesSettingChanged;
+- (void)cursorSettingChanged;
 - (void)badgeTick:(NSTimer *)timer;
 - (void)refreshBadges:(BOOL)force;
 @end
@@ -932,6 +937,15 @@ static void *tapper(void *arg)
             sleep(2);
             continue;
         }
+        if (!strncmp(tok, "brightness:", 11)) {
+            double value = atof(tok + 11);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSUserDefaults standardUserDefaults] setDouble:value forKey:@"cursorCrossBrightness"];
+                tl_log_line("macos: test sets cursor cross brightness %.2f", value);
+            });
+            sleep(2);
+            continue;
+        }
         int screen_no;
         if (sscanf(tok, "screen:%d", &screen_no) == 1) {
             /* The window onto another display (its top left corner, same size). */
@@ -1206,6 +1220,8 @@ static NSString *const kPowerupKey[PVZ2_POWERUP_COUNT] = {
     @"powerup1Key", @"powerup2Key", @"powerup3Key"
 };
 static NSString *const kShowLevelKeys = @"showLevelKeys";   /* the in-level key badges */
+static NSString *const kShowCursorPlant = @"showCursorPlant";
+static NSString *const kCursorCrossBrightness = @"cursorCrossBrightness";
 static NSString *const kPacketX = @"packetX";         /* the first packet's centre */
 static NSString *const kPacketY = @"packetY";
 static NSString *const kPacketStep = @"packetStep";   /* how far apart they are */
@@ -1378,6 +1394,18 @@ static NSString *shown_key(NSString *key, NSString *fallback)
 static bool show_level_keys(void)
 {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kShowLevelKeys];
+}
+
+static bool show_cursor_plant(void)
+{
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:kShowCursorPlant];
+    return value ? [value boolValue] : true;
+}
+
+static double cursor_cross_brightness(void)
+{
+    double value = setting_double(kCursorCrossBrightness, 0.45);
+    return isfinite(value) ? fmin(1.0, fmax(0.0, value)) : 0.45;
 }
 
 /* A point of the surface's pixels, in the game's own 1748x804 space: the
@@ -1975,6 +2003,17 @@ static bool g_badges_live;                 /* what the overlay shows now */
 static unsigned int g_badges_generation;   /* the snapshot last drawn */
 static NSTimer *g_badge_timer;             /* runs only while the setting is on */
 static id g_badge_activity;
+static CALayer *g_cursor_layer;
+static CAShapeLayer *g_cursor_cross;
+static NSTimer *g_cursor_timer;
+static id g_cursor_activity;
+static bool g_cursor_event_known, g_cursor_event_inside;
+static NSPoint g_cursor_event_point;
+static unsigned int g_cursor_drawn_generation;
+static NSDictionary<NSString *, id> *g_cursor_art;
+static bool g_cursor_art_loading;
+static void cursor_preview_tick(void);
+static void cursor_load_art(void);
 
 static NSString *badge_key_text(NSString *key)
 {
@@ -2035,6 +2074,15 @@ static void badges_attach(CAMetalLayer *metal)
     g_badges_attached = true;
     /* The badges follow moving packets and never leave the game's picture. */
     metal.masksToBounds = YES;
+    g_cursor_cross = [CAShapeLayer layer];
+    g_cursor_cross.hidden = YES;
+    g_cursor_cross.fillColor = [NSColor colorWithCalibratedWhite:1 alpha:cursor_cross_brightness()].CGColor;
+    [metal addSublayer:g_cursor_cross];
+    g_cursor_layer = [CALayer layer];
+    g_cursor_layer.hidden = YES;
+    g_cursor_layer.opacity = 0.6;
+    g_cursor_layer.contentsGravity = kCAGravityResizeAspect;
+    [metal addSublayer:g_cursor_layer];
     for (int i = 0; i < PVZ2_BADGE_COUNT; i++) {
         CALayer *box = [CALayer layer];
         box.hidden = YES;
@@ -2111,6 +2159,82 @@ static double host_now(void)
 @implementation PVZ2View
 - (BOOL)isFlipped { return YES; }
 
+- (void)updateTrackingAreas
+{
+    if (self.cursorTracking) [self removeTrackingArea:self.cursorTracking];
+    self.cursorTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+        owner:self userInfo:nil];
+    [self addTrackingArea:self.cursorTracking];
+    [super updateTrackingAreas];
+}
+
+- (void)mouseMoved:(NSEvent *)event
+{
+    g_cursor_event_point = [self convertPoint:event.locationInWindow fromView:nil];
+    g_cursor_event_known = true;
+    g_cursor_event_inside = NSPointInRect(g_cursor_event_point, self.bounds);
+}
+
+- (void)mouseEntered:(NSEvent *)event
+{
+    [self mouseMoved:event];
+}
+
+- (void)mouseExited:(NSEvent *)event
+{
+    (void)event;
+    g_cursor_event_known = true;
+    g_cursor_event_inside = false;
+}
+
+- (void)cursorSettingChanged
+{
+    double brightness = cursor_cross_brightness();
+    static double last_brightness = -1;
+    if (brightness != last_brightness) {
+        last_brightness = brightness;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        g_cursor_cross.fillColor = [NSColor colorWithCalibratedWhite:1 alpha:brightness].CGColor;
+        [CATransaction commit];
+        tl_log_line("macos: cursor cross brightness %.2f", brightness);
+    }
+    bool on = show_cursor_plant();
+    static int logged = -1;
+    if (logged != (int)on) {
+        logged = (int)on;
+        tl_log_line("macos: cursor preview is %s", on ? "on" : "off");
+    }
+    tl_pvz2_set_cursor_enabled(on);
+    if (!on) {
+        [g_cursor_timer invalidate];
+        g_cursor_timer = nil;
+        if (g_cursor_activity) [NSProcessInfo.processInfo endActivity:g_cursor_activity];
+        g_cursor_activity = nil;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        g_cursor_layer.hidden = YES;
+        g_cursor_cross.hidden = YES;
+        g_cursor_layer.contents = nil;
+        [CATransaction commit];
+        g_cursor_drawn_generation = 0;
+        return;
+    }
+    cursor_load_art();
+    if (!g_cursor_timer) {
+        if (background_launch())
+            g_cursor_activity = [NSProcessInfo.processInfo beginActivityWithOptions:NSActivityLatencyCritical
+                                                                            reason:@"Keep the pointer preview in step"];
+        g_cursor_timer = [NSTimer timerWithTimeInterval:1.0 / 120.0 repeats:YES block:^(NSTimer *timer) {
+            (void)timer;
+            cursor_preview_tick();
+        }];
+        g_cursor_timer.tolerance = 0;
+        [[NSRunLoop mainRunLoop] addTimer:g_cursor_timer forMode:NSRunLoopCommonModes];
+    }
+}
+
 /* How the game is put on the screen.
  *
  * Letterbox (the default): the surface is the game's own size and only the
@@ -2123,6 +2247,7 @@ static double host_now(void)
  */
 - (void)applyPresentation
 {
+    g_cursor_event_known = false;
     NSRect b = self.bounds;
     double scale = self.metal.contentsScale;
     /* The surface keeps the shape the game laid itself out for. Its size: the
@@ -2423,10 +2548,10 @@ static NSButton *round_button(NSString *symbol, NSString *tip, SEL action, NSVie
     tl_log_line("macos: the mouse pressed at (%.0f,%.0f) in the window", p.x, p.y);
     [self touch:0 event:event];
 }
-- (void)mouseDragged:(NSEvent *)event { [self touch:1 event:event]; }
+- (void)mouseDragged:(NSEvent *)event { [self mouseMoved:event]; [self touch:1 event:event]; }
 - (void)mouseUp:(NSEvent *)event { [self touch:3 event:event]; }
 - (void)rightMouseDown:(NSEvent *)event { [self touch:0 event:event]; }
-- (void)rightMouseDragged:(NSEvent *)event { [self touch:1 event:event]; }
+- (void)rightMouseDragged:(NSEvent *)event { [self mouseMoved:event]; [self touch:1 event:event]; }
 - (void)rightMouseUp:(NSEvent *)event { [self touch:3 event:event]; }
 
 /* The guest asks for a keyboard when the player taps the name field
@@ -2569,6 +2694,184 @@ static bool pointer_in_game(double *gx, double *gy)
         return false;
     surface_to_game(sx, sy, gx, gy);
     return true;
+}
+
+/* Load the player's own art away from both the game and the UI threads. */
+static void cursor_load_art(void)
+{
+    if (g_cursor_art || g_cursor_art_loading) return;
+    g_cursor_art_loading = true;
+    NSString *name = obb_info()[@"name"] ?: @"main.675.com.ea.game.pvz2_rfl.obb";
+    NSString *path = [obb_dir() stringByAppendingPathComponent:name];
+    if (![NSFileManager.defaultManager fileExistsAtPath:path])
+        path = [bundle_dir(@"Game/obb") stringByAppendingPathComponent:name];
+    double start = host_now();
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        @autoreleasepool {
+            NSDictionary *art = pvz2_cursor_art(path) ?: @{};
+            dispatch_async(dispatch_get_main_queue(), ^{
+                g_cursor_art = art;
+                g_cursor_art_loading = false;
+                g_cursor_drawn_generation = 0;
+                tl_log_line("macos: cursor art: %lu images loaded in %.1f ms",
+                            (unsigned long)art.count, (host_now() - start) * 1000);
+                if (getenv("TL_PVZ2_CURSOR_STATS"))
+                    tl_log_line("macos: cursor art: plant food %s", art[@"IMAGE_UI_HUD_INGAME_PLANTFOOD_BUTTON"] ? "present" : "missing");
+            });
+        }
+    });
+}
+
+static void cursor_preview_tick(void)
+{
+    static unsigned band_generation, waiting_generation;
+    static int band_col = -1, band_row = -1, waiting_col = -1, waiting_row = -1;
+    static double waiting_since;
+    double started = host_now();
+    tl_pvz2_cursor_snapshot s;
+    tl_pvz2_cursor(&s);
+    double gx = 0, gy = 0, sx = 0, sy = 0;
+    bool inside;
+    if (g_cursor_event_known && !atomic_load(&g_cursor_set)) {
+        double x, y, w, h;
+        inside = g_cursor_event_inside &&
+            tl_viewport_fit(g_view.bounds.size.width, g_view.bounds.size.height,
+                            s.surface_w, s.surface_h, &x, &y, &w, &h) &&
+            tl_viewport_map(g_cursor_event_point.x, g_cursor_event_point.y,
+                            x, y, w, h, s.surface_w, s.surface_h, &sx, &sy);
+    } else {
+        inside = pointer_in_game(&gx, &gy);
+        if (inside) game_to_surface(gx, gy, &sx, &sy);
+    }
+    bool changed = s.generation != g_cursor_drawn_generation;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if (changed) {
+        g_cursor_drawn_generation = s.generation;
+        g_cursor_layer.contents = nil;
+        g_cursor_layer.hidden = YES;
+        NSString *key = s.kind == TL_PVZ2_CURSOR_PLANT
+            ? [@"IMAGE_UI_PACKETS_" stringByAppendingString:[@(s.plant) uppercaseString]]
+            : s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
+            : s.kind == TL_PVZ2_CURSOR_PLANT_FOOD ? @"IMAGE_UI_HUD_INGAME_PLANTFOOD_BUTTON" : nil;
+        g_cursor_layer.contents = key ? g_cursor_art[key] : nil;
+    }
+    bool visible = s.live && s.kind != TL_PVZ2_CURSOR_NONE && inside && g_cursor_layer.contents;
+    bool cross = false, keep_band = false;
+    int col = -1, row = -1, x0 = 0, x1 = 0, y0 = 0, y1 = 0, left = 0, right = 0, top = 0, bottom = 0;
+    if (visible && (s.kind == TL_PVZ2_CURSOR_PLANT || s.kind == TL_PVZ2_CURSOR_SHOVEL ||
+                    s.kind == TL_PVZ2_CURSOR_PLANT_FOOD) && s.grid_valid) {
+        col = tl_cursor_grid_axis(&s, 0, (int)((float)sx + .5f));
+        row = tl_cursor_grid_axis(&s, 1, (int)((float)sy + .5f));
+        cross = col >= 0 && col < s.columns && row >= 0 && row < s.rows;
+        tl_pvz2_cursor_target((int)((float)sx + .5f), (int)((float)sy + .5f),
+                              cross && s.kind == TL_PVZ2_CURSOR_PLANT);
+        if (cross && s.kind == TL_PVZ2_CURSOR_PLANT) {
+            bool answer_matches = s.placement_col == col && s.placement_row == row;
+            if (!answer_matches) {
+                if (waiting_col != col || waiting_row != row || waiting_generation != s.generation) {
+                    waiting_col = col; waiting_row = row; waiting_generation = s.generation;
+                    waiting_since = host_now();
+                }
+                /* Keep only the last confirmed band, and never wait indefinitely for a reply. */
+                keep_band = s.placement_known && s.placement_allowed &&
+                            s.placement_col == band_col && s.placement_row == band_row &&
+                            band_generation == s.generation && !g_cursor_cross.hidden &&
+                            host_now() - waiting_since < 0.1;
+            } else {
+                waiting_col = waiting_row = -1;
+            }
+            cross = s.placement_known && s.placement_allowed && answer_matches;
+        } else {
+            waiting_col = waiting_row = -1;
+        }
+        if (cross) {
+            int values[8] = {col, col + 1, row, row + 1, 0, s.columns, 0, s.rows};
+            int *out[8] = {&x0, &x1, &y0, &y1, &left, &right, &top, &bottom};
+            for (int i = 0; i < 8; i++) {
+                int axis = i == 2 || i == 3 || i == 6 || i == 7;
+                int lo = 0, hi = axis ? s.surface_h : s.surface_w;
+                while (lo < hi) {
+                    int mid = lo + (hi - lo) / 2;
+                    if (tl_cursor_grid_band_axis(&s, axis, mid) < values[i]) lo = mid + 1;
+                    else hi = mid;
+                }
+                *out[i] = lo;
+            }
+            CGSize size = g_view.metal.bounds.size;
+            CGFloat xs = size.width / s.surface_w, ys = size.height / s.surface_h;
+            CGMutablePathRef path = CGPathCreateMutable();
+            CGPathAddRect(path, NULL, CGRectMake(left * xs, y0 * ys, (right - left) * xs, (y1 - y0) * ys));
+            CGPathAddRect(path, NULL, CGRectMake(x0 * xs, top * ys, (x1 - x0) * xs, (bottom - top) * ys));
+            g_cursor_cross.frame = g_view.metal.bounds;
+            g_cursor_cross.path = path;
+            CGPathRelease(path);
+            band_col = col; band_row = row; band_generation = s.generation;
+        }
+    }
+    else {
+        tl_pvz2_cursor_target(0, 0, 0);
+        waiting_col = waiting_row = -1;
+    }
+    g_cursor_cross.hidden = !(cross || keep_band);
+    if (getenv("TL_PVZ2_CURSOR_STATS")) {
+        static unsigned generation;
+        static int previous_col = -1, previous_row = -1, hidden, ticks;
+        static bool previous_allowed, measuring;
+        static double began;
+        bool on_lawn = visible && s.kind == TL_PVZ2_CURSOR_PLANT && s.grid_valid &&
+                       col >= 0 && col < s.columns && row >= 0 && row < s.rows;
+        if (!on_lawn || generation != s.generation) {
+            generation = s.generation;
+            previous_col = previous_row = -1;
+            previous_allowed = measuring = false;
+        }
+        if (on_lawn) {
+            if (col != previous_col || row != previous_row) {
+                measuring = previous_col >= 0 && previous_allowed;
+                hidden = ticks = 0; began = host_now();
+                previous_col = col; previous_row = row;
+            }
+            if (measuring) {
+                ++ticks;
+                if (g_cursor_cross.hidden) ++hidden;
+                if (s.placement_known && s.placement_col == col && s.placement_row == row) {
+                    tl_log_line("macos: cursor transition: tile %d,%d allowed %d hidden %d/%d ticks wait %.1f ms",
+                                col, row, s.placement_allowed, hidden, ticks, (host_now() - began) * 1000);
+                    measuring = false;
+                }
+            }
+            previous_allowed = s.placement_known && s.placement_allowed &&
+                               s.placement_col == col && s.placement_row == row;
+        }
+    }
+    if (visible && s.surface_w > 0 && s.surface_h > 0) {
+        CGSize size = g_view.metal.bounds.size;
+        /* The packet picture is larger than the lawn plant at a full row height. */
+        double row_height = s.grid_valid ? 76.0 * s.app_scale * s.camera_scale * size.height / s.app_h
+                                         : size.height * 0.14;
+        double side = row_height * 0.65;
+        g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - side / 2,
+                                         sy * size.height / s.surface_h - side / 2, side, side);
+    }
+    g_cursor_layer.hidden = !visible;
+    [CATransaction commit];
+    static bool last_visible;
+    if (getenv("TL_PVZ2_CURSOR_STATS") && changed && (visible || last_visible))
+        tl_log_line("macos: cursor preview %s, kind %d, driver changed %.1f ms ago",
+                    visible ? "shown" : "hidden", s.kind, (host_now() - s.changed_at) * 1000);
+    last_visible = visible;
+    if (getenv("TL_PVZ2_CURSOR_STATS")) {
+        static double total, worst;
+        static unsigned frames;
+        double used = (host_now() - started) * 1000;
+        total += used;
+        if (used > worst) worst = used;
+        if (++frames == 300) {
+            tl_log_line("macos: cursor preview: %.3f ms average, %.3f ms worst (%u ticks)", total / frames, worst, frames);
+            total = worst = 0; frames = 0;
+        }
+    }
 }
 
 /* The keys. Escape pauses a level and is Android's Back elsewhere (keycode 4), Return is the IME's done key
@@ -2907,6 +3210,7 @@ static void start_updater(void)
             (void)note;
             [g_view followDisplayScale];
             [g_view badgesSettingChanged];
+            [g_view cursorSettingChanged];
             /* the settings window's "Check for updates automatically" */
             id checks = [[NSUserDefaults standardUserDefaults] objectForKey:@"SUEnableAutomaticChecks"];
             if (g_updater && checks && [checks boolValue] != g_updater.updater.automaticallyChecksForUpdates)
@@ -3024,12 +3328,14 @@ static void start_updater(void)
     view.layer.backgroundColor = NSColor.blackColor.CGColor;
     [view.layer addSublayer:layer];
     view.metal = layer;
+    self.window.acceptsMouseMovedEvents = YES;
     /* The badges are sublayers of the game's layer: the window server moves
      * them with the picture in one commit, so a live resize cannot make them
      * trail it. The timer only reads the driver's snapshot; when the setting is
      * off it returns at once. */
     badges_attach(layer);
     [view badgesSettingChanged];
+    [view cursorSettingChanged];
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     /* The surface: the window's own pixels, in the shape the window has now --
      * the game lays itself out for it. */

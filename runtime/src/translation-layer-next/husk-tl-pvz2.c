@@ -24,6 +24,7 @@
 
 #define _DARWIN_C_SOURCE
 #include "husk-tl-pvz2.h"
+#include "husk-tl-cursor-grid.h"
 #include "husk-tl-cdn.h"
 
 #include <errno.h>
@@ -633,6 +634,8 @@ static void J_config_write_bool(tl_jcall *c)
  * ones the engine's own dispatch handlers step over (see PvZ-2-RE's
  * input_queue.cpp); a wrong size desynchronises every later record. */
 typedef struct { uint32_t id; int phase, x, y, px, py; double time_s; } pvz_touch;
+static pvz_touch g_cursor_check_down;
+static bool g_cursor_check_queued;
 typedef struct { char text[64]; int action; double time_s; } pvz_text;
 typedef struct { int keycode, down; double time_s; } pvz_key;
 static struct {
@@ -700,6 +703,10 @@ static void J_process_events(tl_jcall *c)
     pthread_mutex_lock(&TQ.mu);
     while (TQ.n > 0 && used + 48 <= limit - 16) {
         pvz_touch t = TQ.v[0];
+        if (t.phase == 0 && getenv("TL_PVZ2_CURSOR_CHECK")) {
+            g_cursor_check_down = t;
+            g_cursor_check_queued = true;
+        }
         memmove(&TQ.v[0], &TQ.v[1], (size_t)(TQ.n - 1) * sizeof(TQ.v[0]));
         TQ.n--;
         uint32_t *w = (uint32_t *)p;
@@ -2953,6 +2960,28 @@ static uint64_t guest_call2(void *fn, uint64_t a0, uint64_t a1, bool *ok)
     return 0;
 }
 
+static uint64_t guest_call4(void *fn, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, bool *ok)
+{
+    register void *x16 __asm__("x16") = fn;
+    register uint64_t x0 __asm__("x0") = a0;
+    register uint64_t x1 __asm__("x1") = a1;
+    register uint64_t x2 __asm__("x2") = a2;
+    register uint64_t x3 __asm__("x3") = a3;
+    *ok = false;
+    if (!fn) return 0;
+    guest_guard_enter();
+    if (sigsetjmp(g_guest_jmp, 1) == 0) {
+        __asm__ volatile("blr %4" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x16) : :
+                         "x4","x5","x6","x7","x8","x9","x10","x11","x12","x13","x14","x15","x17","memory","cc");
+        guest_guard_leave();
+        *ok = true;
+        return x0;
+    }
+    guest_guard_leave();
+    tl_log_line("pvz2: cursor placement check: guest call faulted (signal %d)", (int)g_guest_fault);
+    return 0;
+}
+
 /* Raw versions for a batch that has entered the guard once. Installing and
  * restoring two signal handlers is four sigaction system calls, and the badge
  * snapshot makes a dozen guest calls a frame: the batch is what keeps that
@@ -4631,6 +4660,323 @@ void tl_pvz2_badges(tl_pvz2_badge_snapshot *out)
     pthread_mutex_unlock(&g_badge_lock);
 }
 
+/* The selected cursor belongs to the game. The host only receives a copy,
+ * and unknown cursor types deliberately have no picture. */
+static atomic_int g_cursor_enabled;
+static atomic_uint g_cursor_epoch;
+static pthread_mutex_t g_cursor_lock = PTHREAD_MUTEX_INITIALIZER;
+static tl_pvz2_cursor_snapshot g_cursor_published;
+static atomic_uint_fast64_t g_cursor_target;
+static uint64_t g_cursor_board, g_cursor_pending, g_cursor_parent;
+static int g_cursor_kind;
+static char g_cursor_plant[24];
+
+/* The native cursor initializes this service on its first validity query. */
+static uint64_t guest_cursor_placement_service(void)
+{
+    static bool init_failed;
+    uint64_t singleton = 0;
+    if (init_failed) return 0;
+    void *slot = tl_aot_guest_data_ptr_any(0x256ad20);
+    if (!slot || !guest_read_bytes((uint64_t)(uintptr_t)slot, &singleton, sizeof singleton)) return 0;
+    if (singleton) return singleton;
+    bool ok = false;
+    uint64_t object = guest_call2(guest_code(0x531190), 8, 0, &ok);
+    if (!ok || !object) return 0;
+    guest_call2(guest_code(0x9b9a50), object, 0, &ok);
+    if (!ok) { init_failed = true; return 0; }
+    if (!guest_read_bytes((uint64_t)(uintptr_t)slot, &singleton, sizeof singleton)) return 0;
+    return singleton;
+}
+
+static void guest_cursor_placement(tl_pvz2_cursor_snapshot *geometry, uint64_t board, uint64_t pending)
+{
+    static uint64_t last_board, last_pending;
+    static int last_col = -1, last_row = -1, known, allowed;
+    static double last_check;
+    uint64_t target = atomic_load(&g_cursor_target);
+    if (!target || !geometry->grid_valid || !board || !pending || g_cursor_kind != TL_PVZ2_CURSOR_PLANT) {
+        last_board = last_pending = 0; known = 0;
+        return;
+    }
+    int x = (int)(uint32_t)(target >> 32) - 1;
+    int y = (int)(uint32_t)target - 1;
+    int col = tl_cursor_grid_axis(geometry, 0, x), row = tl_cursor_grid_axis(geometry, 1, y);
+    if (col < 0 || col >= geometry->columns || row < 0 || row >= geometry->rows) {
+        last_board = last_pending = 0; known = 0;
+        return;
+    }
+    double now = now_s();
+    if (board != last_board || pending != last_pending || col != last_col || row != last_row || now - last_check >= 0.25) {
+        last_board = board; last_pending = pending; last_col = col; last_row = row; last_check = now;
+        known = 0;
+        uint64_t singleton = guest_cursor_placement_service();
+        uint32_t mode = 0;
+        bool ok = false;
+        int tile[2] = {col, row};
+        if (singleton && guest_read_bytes(pending + 0x4c, &mode, sizeof mode)) {
+            uint64_t result = guest_call4(guest_code(0x9ba7f4), singleton,
+                                          (uint64_t)(uintptr_t)tile, pending + 0x40, mode, &ok);
+            if (ok) { known = 1; allowed = (result & 1) != 0; }
+        }
+        if (getenv("TL_PVZ2_CURSOR_VALIDITY"))
+            tl_log_line("pvz2: cursor validity: %s tile %d,%d known %d allowed %d", g_cursor_plant, col, row, known, known && allowed);
+    }
+    geometry->placement_known = known;
+    geometry->placement_allowed = allowed;
+    geometry->placement_col = col; geometry->placement_row = row;
+}
+
+/* The live-board predicate and pending cursor share one fault guard. */
+static uint64_t guest_cursor_live_probe(uint64_t *pending, uint64_t *vt)
+{
+    guest_guard_enter();
+    if (sigsetjmp(g_guest_jmp, 1) != 0) {
+        *pending = *vt = 0;
+        guest_guard_leave();
+        return 0;
+    }
+    uint64_t board = guest_live_board_probe_raw(true, NULL, NULL, NULL, NULL);
+    if (board) {
+        guest_read_bytes_raw(board + 0x408, pending, sizeof *pending);
+        if (*pending) guest_read_bytes_raw(*pending, vt, sizeof *vt);
+    }
+    guest_guard_leave();
+    return board;
+}
+
+/* One guard protects the whole geometry read instead of a Mach read per field. */
+static bool guest_cursor_geometry_read(uint64_t app, uint64_t board, uint64_t parent,
+                                       bool plant, int *app_size, int *board_xy,
+                                       int *dimensions, float *camera, float *app_scale,
+                                       float *row_offset)
+{
+    if (!app || !board || (plant && !parent)) return false;
+    guest_guard_enter();
+    if (sigsetjmp(g_guest_jmp, 1) != 0) {
+        guest_guard_leave();
+        return false;
+    }
+    guest_read_bytes_raw(app + 0xf4, app_size, 2 * sizeof *app_size);
+    guest_read_bytes_raw(app + 0x980, app_scale, sizeof *app_scale);
+    guest_read_bytes_raw(board + 0x44, board_xy, 2 * sizeof *board_xy);
+    guest_read_bytes_raw(board + 0xd8, dimensions, 2 * sizeof *dimensions);
+    guest_read_bytes_raw(board + 0x460, camera, 3 * sizeof *camera);
+    if (plant) guest_read_bytes_raw(parent + 0xd4, row_offset, sizeof *row_offset);
+    guest_guard_leave();
+    return true;
+}
+
+static void guest_cursor_update(void)
+{
+    static int stats_enabled = -1;
+    if (stats_enabled < 0) stats_enabled = getenv("TL_PVZ2_CURSOR_STATS") != NULL;
+    double disabled_started = stats_enabled ? now_s() : 0;
+    static unsigned last_epoch;
+    unsigned epoch = atomic_load(&g_cursor_epoch);
+    if (epoch != last_epoch) {
+        last_epoch = epoch;
+        g_cursor_board = g_cursor_pending = g_cursor_parent = 0;
+        g_cursor_kind = TL_PVZ2_CURSOR_NONE;
+        g_cursor_plant[0] = 0;
+    }
+    if (!atomic_load(&g_cursor_enabled)) {
+        g_cursor_board = g_cursor_pending = g_cursor_parent = 0;
+        g_cursor_kind = TL_PVZ2_CURSOR_NONE;
+        g_cursor_plant[0] = 0;
+        if (stats_enabled) {
+            static double total, worst;
+            static unsigned frames;
+            double used = (now_s() - disabled_started) * 1000;
+            total += used;
+            if (used > worst) worst = used;
+            if (++frames == 300) {
+                tl_log_line("pvz2: cursor snapshot off: %.3f ms average, %.3f ms worst (%u frames)", total / frames, worst, frames);
+                frames = 0; total = worst = 0;
+            }
+        }
+        return;
+    }
+    double started = now_s();
+    uint64_t pending = 0, vt = 0;
+    uint64_t board = guest_cursor_live_probe(&pending, &vt);
+    if (board != g_cursor_board || pending != g_cursor_pending) {
+        g_cursor_board = board;
+        g_cursor_pending = pending;
+        g_cursor_parent = 0;
+        g_cursor_kind = TL_PVZ2_CURSOR_NONE;
+        memset(g_cursor_plant, 0, sizeof g_cursor_plant);
+        if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x24d8b60)) {
+            g_cursor_kind = TL_PVZ2_CURSOR_SHOVEL;
+        } else if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x241d3a0)) {
+            g_cursor_kind = TL_PVZ2_CURSOR_PLANT_FOOD;
+        } else if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x2491a60)) {
+            bool ok = false;
+            uint64_t registry = guest_call2(guest_code(GUEST_UI_REGISTRY), 0, 0, &ok);
+            uint64_t packet = ok && registry
+                ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x38), &ok) : 0;
+            unsigned char str[24] = { 0 };
+            volatile bool got_string = false;
+            if (ok && packet) {
+                guest_guard_enter();
+                if (sigsetjmp(g_guest_jmp, 1) == 0)
+                    got_string = guest_read_bytes_raw(packet + 0x1a8, str, sizeof str);
+                guest_guard_leave();
+            }
+            if (got_string &&
+                !(str[0] & 1) && (str[0] >> 1) > 0 && (str[0] >> 1) < sizeof g_cursor_plant) {
+                size_t n = str[0] >> 1;
+                memcpy(g_cursor_plant, str + 1, n);
+                g_cursor_kind = TL_PVZ2_CURSOR_PLANT;
+                uint64_t image = registry ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x40), &ok) : 0;
+                g_cursor_parent = ok && image ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(image + 0x68), &ok) : 0;
+            }
+        }
+    }
+    tl_pvz2_cursor_snapshot geometry = {0};
+    if (board && pending && (g_cursor_kind == TL_PVZ2_CURSOR_PLANT || g_cursor_kind == TL_PVZ2_CURSOR_SHOVEL ||
+                             g_cursor_kind == TL_PVZ2_CURSOR_PLANT_FOOD)) {
+        uint64_t app = atomic_load(&g_app_object);
+        int app_size[2] = {0}, board_xy[2] = {0}, dimensions[2] = {0};
+        float camera[3] = {0}, app_scale = 0, row_offset = 0;
+        if (guest_cursor_geometry_read(app, board, g_cursor_parent, g_cursor_kind == TL_PVZ2_CURSOR_PLANT,
+                                       app_size, board_xy, dimensions, camera, &app_scale, &row_offset) &&
+            app_size[0] > 0 && app_size[1] > 0 && isfinite(app_scale) && app_scale > 0 &&
+            isfinite(camera[0]) && camera[0] > 0 && isfinite(camera[1]) && isfinite(camera[2]) &&
+            isfinite(row_offset) && fabsf(row_offset) < 100000 &&
+            dimensions[0] > 0 && dimensions[1] > 0) {
+            geometry.grid_valid = 1;
+            geometry.app_w = app_size[0]; geometry.app_h = app_size[1];
+            geometry.board_x = board_xy[0]; geometry.board_y = board_xy[1];
+            geometry.columns = dimensions[0] < 9 ? dimensions[0] : 9;
+            geometry.rows = dimensions[1] < 5 ? dimensions[1] : 5;
+            geometry.app_scale = app_scale;
+            geometry.camera_scale = camera[0]; geometry.camera_x = camera[1]; geometry.camera_y = camera[2];
+            geometry.row_offset = row_offset;
+        }
+    }
+    geometry.surface_w = P.w; geometry.surface_h = P.h;
+    guest_cursor_placement(&geometry, board, pending);
+    if (getenv("TL_PVZ2_CURSOR_STATS")) {
+        static uint64_t last_pending;
+        if (pending != last_pending) {
+            last_pending = pending;
+            if (pending) tl_log_line("pvz2: cursor probe: plant %s kind %d row_offset %.2f valid %d",
+                                     g_cursor_plant, g_cursor_kind, geometry.row_offset, geometry.grid_valid);
+        }
+    }
+    pthread_mutex_lock(&g_cursor_lock);
+    if (!atomic_load(&g_cursor_enabled) || epoch != atomic_load(&g_cursor_epoch)) {
+        pthread_mutex_unlock(&g_cursor_lock);
+        return;
+    }
+    if (g_cursor_published.kind != g_cursor_kind ||
+        g_cursor_published.live != (board != 0) || g_cursor_published.surface_w != P.w ||
+        g_cursor_published.surface_h != P.h ||
+        strcmp(g_cursor_published.plant, g_cursor_plant)) {
+        bool selected_changed = g_cursor_published.kind != g_cursor_kind ||
+                                strcmp(g_cursor_published.plant, g_cursor_plant);
+        g_cursor_published.kind = g_cursor_kind;
+        g_cursor_published.live = board != 0;
+        g_cursor_published.surface_w = P.w;
+        g_cursor_published.surface_h = P.h;
+        memcpy(g_cursor_published.plant, g_cursor_plant, sizeof g_cursor_plant);
+        if (++g_cursor_published.generation == 0) ++g_cursor_published.generation;
+        g_cursor_published.changed_at = now_s();
+        if (selected_changed && getenv("TL_PVZ2_CURSOR_STATS"))
+            tl_log_line("pvz2: cursor selection: kind %d plant %s", g_cursor_kind,
+                        g_cursor_plant[0] ? g_cursor_plant : "none");
+    }
+    g_cursor_published.grid_valid = geometry.grid_valid;
+    g_cursor_published.app_w = geometry.app_w; g_cursor_published.app_h = geometry.app_h;
+    g_cursor_published.board_x = geometry.board_x; g_cursor_published.board_y = geometry.board_y;
+    g_cursor_published.columns = geometry.columns; g_cursor_published.rows = geometry.rows;
+    g_cursor_published.app_scale = geometry.app_scale; g_cursor_published.camera_scale = geometry.camera_scale;
+    g_cursor_published.camera_x = geometry.camera_x; g_cursor_published.camera_y = geometry.camera_y;
+    g_cursor_published.row_offset = geometry.row_offset;
+    g_cursor_published.placement_known = geometry.placement_known;
+    g_cursor_published.placement_allowed = geometry.placement_allowed;
+    g_cursor_published.placement_col = geometry.placement_col;
+    g_cursor_published.placement_row = geometry.placement_row;
+    pthread_mutex_unlock(&g_cursor_lock);
+    if (getenv("TL_PVZ2_CURSOR_STATS")) {
+        static double total, worst;
+        static unsigned frames;
+        double used = (now_s() - started) * 1000;
+        total += used;
+        if (used > worst) worst = used;
+        if (++frames == 300) {
+            tl_log_line("pvz2: cursor snapshot: %.3f ms average, %.3f ms worst (%u frames)", total / frames, worst, frames);
+            frames = 0; total = worst = 0;
+        }
+    }
+}
+
+void tl_pvz2_set_cursor_enabled(int on)
+{
+    int next = on != 0;
+    if (atomic_exchange(&g_cursor_enabled, next) == next) return;
+    if (!on) atomic_store(&g_cursor_target, 0);
+    atomic_fetch_add(&g_cursor_epoch, 1);
+    if (on) return;
+    pthread_mutex_lock(&g_cursor_lock);
+    g_cursor_published.kind = TL_PVZ2_CURSOR_NONE;
+    g_cursor_published.live = 0;
+    g_cursor_published.plant[0] = 0;
+    ++g_cursor_published.generation;
+    g_cursor_published.changed_at = now_s();
+    pthread_mutex_unlock(&g_cursor_lock);
+}
+
+void tl_pvz2_cursor_target(int x, int y, int on)
+{
+    uint64_t value = 0;
+    if (on && x >= 0 && y >= 0 && x < 100000 && y < 100000)
+        value = ((uint64_t)(uint32_t)(x + 1) << 32) | (uint32_t)(y + 1);
+    atomic_store(&g_cursor_target, value);
+}
+
+void tl_pvz2_cursor(tl_pvz2_cursor_snapshot *out)
+{
+    if (!out) return;
+    pthread_mutex_lock(&g_cursor_lock);
+    *out = g_cursor_published;
+    pthread_mutex_unlock(&g_cursor_lock);
+}
+
+/* Compare the pre-input snapshot with the cursor produced by the ordinary touch. */
+static void guest_cursor_check(void)
+{
+    if (!g_cursor_check_queued) return;
+    g_cursor_check_queued = false;
+    tl_pvz2_cursor_snapshot s;
+    tl_pvz2_cursor(&s);
+    if (s.kind != TL_PVZ2_CURSOR_PLANT || !s.live) return;
+    if (!s.grid_valid) {
+        tl_log_line("pvz2: cursor check: geometry unavailable at %d,%d", g_cursor_check_down.x, g_cursor_check_down.y);
+        return;
+    }
+    bool ok = false;
+    uint64_t board = guest_call2(guest_code(GUEST_BOARD_GETTER), 0, 0, &ok);
+    uint64_t begin = 0, end = 0, cursor = 0, vt = 0;
+    int grid[2] = {-999, -999};
+    if (!ok || !board || !guest_read_bytes(board + 0x3f0, &begin, 8) ||
+        !guest_read_bytes(board + 0x3f8, &end, 8) || !begin || end <= begin || end - begin > 128 ||
+        !guest_read_bytes(begin, &cursor, 8) || !cursor || !guest_read_bytes(cursor, &vt, 8) ||
+        vt != (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x2491a60)) {
+        tl_log_line("pvz2: cursor check: no active plant cursor at %d,%d", g_cursor_check_down.x, g_cursor_check_down.y);
+        return;
+    }
+    guest_call_x8(guest_code(0x10c651c), cursor, 0, grid, &ok);
+    int x = tl_cursor_grid_axis(&s, 0, g_cursor_check_down.x);
+    int y = tl_cursor_grid_axis(&s, 1, g_cursor_check_down.y);
+    if (x < 0 || x >= s.columns) x = -1;
+    if (y < 0 || y >= s.rows) y = -1;
+    tl_log_line("pvz2: cursor check: surface=%d,%d predicted=%d,%d native=%d,%d %s",
+                g_cursor_check_down.x, g_cursor_check_down.y, x, y, grid[0], grid[1],
+                ok && x == grid[0] && y == grid[1] ? "match" : "MISMATCH");
+}
+
 static void *guest_app_finder(void *arg)
 {
     (void)arg;
@@ -5024,6 +5370,8 @@ static void *gl_main(void *arg)
             lc_report_done(lc_seq);
         }
         if (atomic_load(&P.paused)) {
+            /* A paused host draws no further frames, so clear the preview here. */
+            guest_cursor_update();
             /* The app is not in front, but the thread is still running: the
              * guest's jobs keep being queued and they are run here, so that a
              * job the guest queued on the way out (its save) is not left in the
@@ -5038,6 +5386,7 @@ static void *gl_main(void *arg)
          * queue is left alone until it comes back. The save it made on the way
          * out was made by the event itself, which is over. */
         if (atomic_load(&P.in_background)) {
+            guest_cursor_update();
             if (pump && pump_when() != 0) pump(tl_jni_env(), P.view);
             pace_frame(20000000L);   /* 20 ms: the guest's thread idles, it does not draw */
             continue;
@@ -5053,6 +5402,8 @@ static void *gl_main(void *arg)
         /* The key badges' snapshot: after the frame, so the rectangles are the
          * ones just drawn. One atomic load per frame when the setting is off. */
         guest_badges_update();
+        guest_cursor_check();
+        guest_cursor_update();
         /* The memory warning, on the game's own thread. */
         if (atomic_exchange(&g_low_memory_pending, 0)) guest_low_memory_warning();
         /* The host's own touches: any that are left down are released. */

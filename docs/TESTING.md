@@ -28,6 +28,9 @@ What it sets (you can set these yourself when running the binary by hand):
 | `TL_PVZ2_MAIN_TAR` | override the writable CDN cache path; skips bundle staging (use a test copy) |
 | `TL_PVZ2_FRAMES`, `TL_PVZ2_FRAME_EVERY` | save only this app's rendered frame as `latest.bmp` in an existing directory, every N frames; works with the lid closed |
 | `TL_PVZ2_LOG` | where the log goes |
+| `TL_PVZ2_CURSOR_CHECK=1` | compare the predicted tile with the native active plant cursor on touch down; log `match`, `MISMATCH`, or an unavailable result |
+| `TL_PVZ2_CURSOR_VALIDITY=1` | log the game's plant-placement result for each requested on-lawn tile and periodic recheck |
+| `TL_PVZ2_CURSOR_STATS=1` | log 300-frame snapshot and host preview costs, including the disabled snapshot cost, and cross visibility while a new tile is checked |
 | `TL_PVZ2_IMPORT_FROM=<domain>` | import settings once from this domain; background tests otherwise skip import. Use a test bundle ID and test domains only. |
 | `TL_PVZ2_TAP`, `TL_PVZ2_TAP_DELAY` | the tap script, and the seconds before it starts (default 3) |
 | `TL_PVZ2_QUIET=1` | a test window: small, in the corner, never takes the focus, never remembered |
@@ -198,6 +201,7 @@ Commands separated by `;`, run in order on their own thread:
 | `close`, `reopen`, `quit` | the close button, a Dock click, quitting (tests never get the quit prompt) |
 | `settings`, `settings:<pane>` | open the settings window (general, keyboard, about) |
 | `cursor:x,y` | where the pointer is (the person's mouse is never moved) |
+| `brightness:v` | set the test app's own Cross brightness setting (0 to 1), to check that the cross follows it live |
 | `mode:`, `aspect:`, `fit`, `keep` | window-mode tests. **`mode:` and `aspect:` write the app's saved settings** |
 
 ## Keyboard shortcuts
@@ -216,6 +220,30 @@ names each action and why it was refused:
 - Outside a level, paused or behind a popup, each logs `ignored: ...` and does nothing.
 
 ## Reading the result
+
+For the pointer cross, use a test bundle ID and copied save, enable `-showCursorPlant YES` and
+`TL_PVZ2_CURSOR_CHECK=1`, then select a plant and click on either side of tile boundaries. The
+`cursor check` line compares the surface point's predicted column and row with the game's active
+cursor during the down. A missing active cursor is not a successful comparison. Capture the
+test's window to see the host overlay: `TL_PVZ2_FRAMES` records the game frame without that layer.
+For plant food, stock the counter in a copied save, pick it up with Q or a click, and check that
+the leaf and cross disappear after it is used on a plant.
+The Keyboard settings' Cross brightness slider defaults to 45%; `-cursorCrossBrightness 0.2` overrides it for a launch.
+Test resized and letterboxed windows as well as ordinary windows, and use an isolated save on an
+unusual lawn. With `TL_PVZ2_CURSOR_VALIDITY=1`, compare the `allowed` result and the cross with
+a native drag over the same tile, including an occupied tile, a gap and a changing tide. The
+picture should remain visible when the plant cross is hidden. Shovel and plant food do not use
+the plant placement check.
+For movement, the `cursor transition` lines count hidden host ticks while a previously allowed
+plant moves to another tile and the game answers. On a rejected tile, the cross must disappear
+when the rejection arrives; the last confirmed band can be retained for at most 100 ms.
+
+The arithmetic regression test needs no game files:
+
+```sh
+cc -std=c11 -Iruntime/src/translation-layer-next runtime/tools/regress/test-cursor-grid.c -lm -o /tmp/test-cursor-grid
+/tmp/test-cursor-grid
+```
 
 - Look at the shots yourself. A log that says "drawn" is not a picture of the game.
 - Useful log lines: `pvz2: the game has started` (past start-up, ~9 s), `macos: frames=..., last 5s=..

@@ -35,6 +35,9 @@ through a guard that turns a fault into a log line instead of a crash.
 | 0xaa1be8, 0x12d2374 | the seed bank and one packet in it | key 1-8 picks a packet |
 | packet vtable +0x90 | the packet's own pointer-down handler (normal packet vtable 0x24b2940) | the pick itself |
 | 0x761074 | the game's release decision for a new cursor (PlantCursor vtable 0x2491a60) | a second press cancels, like a second tap |
+| board +0x408 | pending cursor; null when no item is held | read-only selection state |
+| cursor vtables 0x2491a60, 0x24d8b60 | plant and shovel cursors, respectively | distinguish held plants from the shovel |
+| plant cursor +0x38, packet +0x1a8 | managed reference to the packet, and its libc++ TypeName string | identify the held plant |
 | 0x13ab0a0, vtable 0x24d8b60 | the shovel's pointer-down, and the shovel cursor | S |
 | 0x11beef0, 0x14ea3cc / 0x14ea364 / 0x14ea3b0 / 0x14ea1fc | the iterator over the board's collectables (pool 0x48) | Space |
 | 0x64f998 | a collectable's own "clicked" request (the game picks the flight and awards the value) | Space collects suns (vtable 0x2395208), real coins (0x23bb9b8), gems (0x2399d48), plant food (0x24250b8) and sprouts (0x24d5ce0) only; fake coins (0x23bbc18) and rewards are not accepted |
@@ -62,6 +65,43 @@ through a guard that turns a fault into a log line instead of a crash.
 - Every action is refused, with a log line saying why, unless the board is live, nothing is paused
   and no modal is up. Never write the game's sun, currency or object state directly: call the game's
   own functions and let it do its bookkeeping.
+- **Held item art.** In the 1.4.2 resource metadata a plant's packet picture is named
+  `IMAGE_UI_PACKETS_<uppercase TypeName>`; the shovel picture is
+  `IMAGE_UI_HUD_INGAME_SHOVEL_ICON`. The resource metadata supplies atlas rectangles, and the
+  OBB contains the corresponding RGBA atlas data. These names and layouts are version-sensitive.
+  Plant food uses the HUD button's leaf; the bank collect image is a glow, not the held leaf.
+
+## Selected item at the pointer
+
+The Mac reads a separate selection snapshot on the game thread after each frame. It uses the
+same live-play predicate as the badges, resolves the plant cursor's packet and parent references
+only when the pending pointer changes, and publishes the TypeName, shovel or plant food kind.
+Plant food's pending cursor vtable is `0x241d3a0`. Unknown cursor classes are hidden. The host draws a passive
+layer inside the game's Metal layer, and never changes input.
+
+The Mac reads `PROPERTIES/RESOURCES.RTON`, the 1536 seed-packet atlas and the 768 always-loaded atlas from
+the player's bundled or downloaded OBB, on a background queue. It uses the resource IDs above
+and the RTON atlas rectangles, premultiplies the straight-alpha RGBA pixels, and caches the
+cropped images for the launch. Missing images are hidden. This avoids depending on a window
+capture, which can fail or return stale pixels. The setting is on by default; launch with
+`-showCursorPlant NO` to turn it off for a test. `TL_PVZ2_CURSOR_STATS=1` logs frame costs.
+
+The pointer cross uses the board's input transform, not fitted screen coordinates. The game
+thread reads app width/height `+0xf4/+0xf8`, app scale `+0x980`, board position `+0x44/+0x48`,
+board scale `+0x460`, pivot `+0x464/+0x468`, and the resolved plant cursor parent's row offset
+`+0xd4`. The shovel's grid uses no parent row offset. Board dimensions `+0xd8/+0xdc` bound the
+cross. The host mirrors the rounding in board input `0xab21dc`, cursor input `0x760a98`, and grid
+conversion `0x9b17d0` / `0x9b17f8`; it searches that forward mapping for tile edges. The game's
+plant-specific row offset selects the row but does not shift its drawn band. For a plant, the host
+posts the pointer's surface coordinate to the game thread, which calls the native placement check
+`0x9ba7f4` with the tile, pending cursor reference `+0x40` and mode `+0x4c`. The service at
+`0x256ad20` is lazily initialized using the game's own constructor `0x9b9a50`. The result is
+rechecked on a tile or selection change and every quarter second while still; only the cross is
+hidden on an invalid tile. Shovel and plant food retain their cross without this plant-only check.
+While the board is not live,
+including the level introduction, both pointer layers are hidden.
+The picture uses 65% of the geometry's row height throughout the game view, including off the
+lawn, so it scales with the board without changing size at the lawn edge.
 
 ## In-level key badges
 

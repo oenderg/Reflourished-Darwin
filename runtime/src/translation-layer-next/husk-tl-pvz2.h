@@ -241,6 +241,25 @@ void tl_pvz2_set_badges_enabled(int on);
 /* A copy of the last snapshot. Always safe on any thread. */
 void tl_pvz2_badges(tl_pvz2_badge_snapshot *out);
 
+/* A read-only selection, published by the game thread after drawing a frame. */
+enum { TL_PVZ2_CURSOR_NONE, TL_PVZ2_CURSOR_PLANT, TL_PVZ2_CURSOR_SHOVEL,
+       TL_PVZ2_CURSOR_PLANT_FOOD };
+typedef struct {
+    unsigned int generation;
+    int kind;
+    int live, surface_w, surface_h;
+    char plant[24];
+    double changed_at;
+    int grid_valid, app_w, app_h, board_x, board_y;
+    int columns, rows;
+    float app_scale, camera_scale, camera_x, camera_y, row_offset;
+    int placement_known, placement_allowed, placement_col, placement_row;
+} tl_pvz2_cursor_snapshot;
+void tl_pvz2_set_cursor_enabled(int on);
+void tl_pvz2_cursor(tl_pvz2_cursor_snapshot *out);
+/* The host posts surface coordinates; the game thread evaluates the target. */
+void tl_pvz2_cursor_target(int x, int y, int on);
+
 #ifdef __cplusplus
 }
 #endif
