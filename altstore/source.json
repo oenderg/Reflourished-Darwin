@@ -20,6 +20,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.0",
+          "buildVersion": "10500",
+          "date": "2026-11-15",
+          "localizedDescription": "Reflourished 1.5.0. The game is now PvZ2: Reflourished 1.5.0 on iPhone, iPad, Mac and Windows, with the mod's first hotfix (1.5.0-R00) included. Your saves carry over.\n\n• The game's data is new: after updating, the first start downloads it once (1.4 GB). The full downloads already carry it.\n• Seed packets 9 and 10 have keys, for the levels that give you that many: 5 and T by default. Change them in Settings > Keyboard; keys you set yourself stay as they are.\n• The app has the mod's new icon.\n• iPhone and iPad: a tap made while another finger is down now reaches the game.\n• Windows: after a seed key, the plant at the pointer now shows up reliably.",
+          "downloadURL": "https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.0/PvZ2-Reflourished-1.5.0-Darwin-1.5.0-iOS.ipa",
+          "size": 55021657,
+          "minOSVersion": "15.5"
+        },
+        {
           "version": "1.4.0",
           "buildVersion": "10400",
           "date": "2026-11-11",
