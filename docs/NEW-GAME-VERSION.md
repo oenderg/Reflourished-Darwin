@@ -33,6 +33,16 @@ The Android app follows `latest.json` by itself (its Java side downloads the pat
 applies it); our apps do not, they stay on the pinned OBB (see [GAME-NOTES.md](GAME-NOTES.md),
 "The mod's own updaters"). Older OBBs are on github.com/lantern-fans/obbybackup, one tag per version.
 
+Since 1.5.0 the mod also replaces its own library after the APK is installed, so the APK's
+`libRFLib.so` is not what Android players run. A build uses the library `mod_lib` pins instead
+(`scripts/mod-lib.py` puts it into a copy of the APK): `version` (what the title screen shows),
+`timestamp` and `sha256` from `https://reflourished.ducnguyen.org/libcdn/liblatesttimerelease`,
+`apk_sha256` (the APK's own `libRFLib.so`), `url` and `member` (the file's name in the tar).
+`libs_sha256` names the pinned library, not the APK's. **When the mod publishes a newer library**
+(the link then serves that one, and a build without a kept copy stops with a message): change
+`mod_lib` and `libs_sha256`, write the hook table again (step 3), and attach the new file to the
+build-inputs draft as `libRFLib-<mod_lib version>.so` ([RELEASING.md](RELEASING.md)).
+
 The version is also written in these places (search for the old version number):
 
 - `build.sh`: the data and hook file names, and the CDN archive's name;
@@ -51,7 +61,7 @@ name another version.
 
 ## 3. The hook table
 
-`libRFLib` installs its inline hooks (452 in 1.5.0) into `libPVZ2` at start-up by writing branches
+`libRFLib` installs its inline hooks (453 in 1.5.0-R00) into `libPVZ2` at start-up by writing branches
 over function prologues. A converted library cannot be written at run time, so the converter bakes a
 dispatch stub into every hooked function ahead of time, and it has to know which functions those
 are: `data/hooks-<version>.json` lists them (each `site` is the function's address in `libPVZ2.so`).

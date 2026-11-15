@@ -28,6 +28,11 @@ nothing is published. The workflow downloads `PvZ2-Reflourished-<game version>.a
 `apk_url` is empty. For a new game version, attach its APK to that draft (Releases > the draft >
 Edit). **Never publish it.** A fork has no such draft: it passes a link.
 
+The same draft keeps the mod's library a game version pins, as `libRFLib-<mod_lib version>.so`
+(for example `libRFLib-1.5.0-R00.so`; `data/game-<version>.json`, `mod_lib`). The mod's own link
+only serves its newest library, so without the kept copy a build fails as soon as the mod
+publishes another one. A local build takes the file with `./build.sh --mod-lib <file>`.
+
 The run uses GitHub's `xcode-27` runner (Xcode 27, the same SDK as a local build; a preview image, so a run can queue); expect the better part of an hour the first time. For both
 variants it builds slim first, packages it, removes intermediate bundles, then builds full with
 the same converted game libraries. The build number comes from the version, not the run number.

@@ -83,10 +83,14 @@ echo "    $(xcrun nm -g "$OUT/libbionic-shim.dylib" | awk '$2 ~ /^[TDRB]$/' | wc
 convert() {
     local so="$1" index="$2"; shift 2
     local dylib="$OUT/$so.dylib"
-    # A dylib older than the hook table was baked from another table: convert it again.
-    if [ -f "$dylib" ] && [ -z "${FORCE:-}" ] && { [ -z "$HOOKS" ] || [ ! "$HOOKS" -nt "$dylib" ]; }; then
+    # A dylib is reused when it was converted from this very library (its checksum is kept
+    # beside it) and is not older than the hook table, which is baked into it.
+    local src; src="$(shasum -a 256 "$LIB/$so.so" | cut -d' ' -f1)"
+    if [ -f "$dylib" ] && [ -z "${FORCE:-}" ] && [ "$(cat "$dylib.src" 2>/dev/null)" = "$src" ] &&
+       { [ -z "$HOOKS" ] || [ ! "$HOOKS" -nt "$dylib" ]; }; then
         echo "==> $so.dylib is already there"; return
     fi
+    rm -f "$dylib.src"
     echo "==> converting $so.so for $TARGET"
     set +e
     python3 "$R/aot-convert.py" "$LIB/$so.so" -o "$OUT" --target "$TARGET" \
@@ -99,6 +103,7 @@ convert() {
     # --force for the same reason as the shim: the converter has already signed the
     # dylib it produced, and codesign refuses to sign a file that carries a signature.
     codesign --force -s - "$dylib"
+    echo "$src" > "$dylib.src"
 }
 
 # The index is which of the guest's libraries this is, in the order they are converted. It

@@ -1,11 +1,12 @@
 #!/bin/bash
 # Build PvZ2: Reflourished for iPhone, iPad and Mac from the Android release.
 #
-#   ./build.sh --apk <file|url> [--obb <file|url>] [--cdn <file|url>] [--ios] [--ios-sim] [--mac] [--slim] [--quick] [--reuse-converted] [--out dir]
+#   ./build.sh --apk <file|url> [--obb <file|url>] [--cdn <file|url>] [--mod-lib <file>] [--ios] [--ios-sim] [--mac] [--slim] [--quick] [--reuse-converted] [--out dir]
 #
 # Without --ios, --ios-sim or --mac, iOS and Mac are built. --apk and --obb take a file, or a link
 # (direct, Google Drive or MEGA) that is downloaded first; without --obb the OBB
-# comes from the mod's own release. --slim makes the apps without the OBB inside
+# comes from the mod's own release. --mod-lib is a kept copy of the mod's library this version
+# pins, for when the mod's link has moved on to a newer one (scripts/mod-lib.py). --slim makes the apps without the OBB inside
 # (the IPA is about 60 MB, the Mac disk image about 65 MB): they download it themselves
 # on their first launch. --quick reuses the game's converted code from the last
 # build in the same --out and skips the disk image: the fast loop while working
@@ -37,6 +38,7 @@ while [ $# -gt 0 ]; do
         --ios) WANT_IOS=1; shift ;;
         --ios-sim) WANT_IOS_SIM=1; shift ;;
         --mac) WANT_MAC=1; shift ;;
+        --mod-lib) MOD_LIB="$2"; shift 2 ;;
         --slim) SLIM=1; shift ;;
         --quick) QUICK=1; shift ;;
         --reuse-converted) REUSE_CONVERTED=1; shift ;;
@@ -68,6 +70,9 @@ fetch() {   # fetch <file|url> <dest>: a local file is used as it is
 }
 step "the game files"
 APK="$(fetch "$APK" "$WORK/game.apk")"
+# The mod's library is the one this version pins, not the APK's own (scripts/mod-lib.py).
+python3 "$ROOT/scripts/mod-lib.py" "$APK" "$WORK/game-mod.apk" ${MOD_LIB:+--lib "$MOD_LIB"}
+APK="$WORK/game-mod.apk"
 # The OBB: needed for full apps, not for slim ones (they download it themselves).
 NEED_OBB=1
 [ "$SLIM" = 1 ] && NEED_OBB=0

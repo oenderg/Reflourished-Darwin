@@ -397,8 +397,10 @@ package until a release of ours pins a newer one. In the log this shows as
 `/libcdn/liblatestrelease.tar` (one file, `libRFLib64.so`) into the app's private folder; the next
 start loads that file in place of the APK's (`FilePickerHelper.loadRFLibDebug`, three failed starts
 drop it). The title screen names the library: `1.5.0-BASE` is the APK's, `1.5.0-R00` the first one
-published this way (built 2026-11-14 22:07, SHA-256 `886fb10c...`). Our apps cannot load new code
+published this way (built 2026-11-14 22:07, SHA-256 `886fb10c...`). Our apps do not load new code
 at run time (the library is converted and signed ahead of time), so `getPrivateDir()` stays
 unimplemented and the game logs `DevLib: could not resolve the private data dir, skipping`. A
 newer library is a new conversion with its own hook table: R00 asks for 453 hooks, one more than
-BASE. The link names only the newest file, so a build that wants a given one needs its own copy.
+BASE. A build pins one library (`mod_lib` in `data/game-<version>.json`, put into a copy of the
+APK by `scripts/mod-lib.py`). The link names only the newest file, so a build that wants a given
+one needs its own copy.

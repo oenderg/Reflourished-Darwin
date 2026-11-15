@@ -4,7 +4,7 @@
   "library": "libPVZ2.so",
   "site": "the hooked function's address in the library (guest virtual address)",
   "recorded": "converter/aot-hook-sites.py, from a HUSK_HOOK_TRACE=1 run of a converted build",
-  "count": 452
+  "count": 453
  },
  "hooks": [
   {
@@ -267,6 +267,9 @@
   },
   {
    "site": 10341500
+  },
+  {
+   "site": 10348868
   },
   {
    "site": 10383956
