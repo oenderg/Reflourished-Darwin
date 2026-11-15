@@ -1208,7 +1208,8 @@ static void *tapper(void *arg)
 
 static NSString *const kSlotKey[PVZ2_SLOT_COUNT] = {
     @"seedSlot1", @"seedSlot2", @"seedSlot3", @"seedSlot4",
-    @"seedSlot5", @"seedSlot6", @"seedSlot7", @"seedSlot8"
+    @"seedSlot5", @"seedSlot6", @"seedSlot7", @"seedSlot8",
+    @"seedSlot9", @"seedSlot10"
 };
 static NSString *const kShovelKey = @"shovelKey";
 static NSString *const kFastForwardKey = @"fastForwardKey";

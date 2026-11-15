@@ -3,8 +3,8 @@
  *
  * The mapping is one thing in two places, so it is written once here:
  *
- *   - which key means which packet (1-4, then Q W E R) and which means the
- *     shovel (S);
+ *   - which key means which packet (1-4, then Q W E R, then 5 and T for the
+ *     ninth and tenth, which a few levels have) and which means the shovel (S);
  *   - where the seed bank is, in the game's own 1748x804.
  *
  * The positions are *measured*, in the guest's own frame (the app's own frame
@@ -32,11 +32,11 @@
 #include <string.h>
 #include <strings.h>
 
-#define PVZ2_SLOT_COUNT 8
+#define PVZ2_SLOT_COUNT 10
 
 /* The keys the packets answer to, out of the box. */
 static const char *const pvz2_default_slot_keys[PVZ2_SLOT_COUNT] = {
-    "1", "2", "3", "4", "Q", "W", "E", "R"
+    "1", "2", "3", "4", "Q", "W", "E", "R", "5", "T"
 };
 #define PVZ2_DEFAULT_SHOVEL_KEY "S"
 
