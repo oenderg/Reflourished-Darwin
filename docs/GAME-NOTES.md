@@ -377,3 +377,28 @@ with a fresh **device-clock UTC Date**, so offline events follow the device cloc
 headers are reused only when their body hash matches. `TL_PVZ2_CDN=offline` forces this
 path without a network request. `TL_PVZ2_MAIN_TAR` overrides the writable cache path and
 skips bundle staging, for tests with their own archive.
+
+## The mod's own updaters (1.5.0)
+
+Reflourished 1.5.0 updates itself on Android in two ways that our apps do not follow. Both
+matter when choosing what a release of ours contains.
+
+**The OBB.** The Android app's Java side (`ObbUpdater`, before the game starts) reads
+`https://rsb.ducnguyen.org/live/latest.json`: the newest package's `time`, the links to its `full`
+file and to a `patch` from the package before (`prev`), and their sizes and SHA-256. It downloads
+the patches (or the full file) and `libRFLib` applies them (`rsbpatch`); the installed package's
+time is kept in `obbTimestamp` beside the OBB. Our apps have no Java side: the hosts download the
+one OBB that `data/game-<version>.json` pins and check its SHA-256, so a player stays on that
+package until a release of ours pins a newer one. In the log this shows as
+`UNIMPLEMENTED Java method FilePickerHelper.getObbDir()`, which is the intended answer.
+
+**The mod's library.** `libRFLib` asks `https://reflourished.ducnguyen.org/libcdn/liblatesttimerelease`
+(`timestamp`, `sha256_lib`) and, when it is newer than itself, downloads
+`/libcdn/liblatestrelease.tar` (one file, `libRFLib64.so`) into the app's private folder; the next
+start loads that file in place of the APK's (`FilePickerHelper.loadRFLibDebug`, three failed starts
+drop it). The title screen names the library: `1.5.0-BASE` is the APK's, `1.5.0-R00` the first one
+published this way (built 2026-11-14 22:07, SHA-256 `886fb10c...`). Our apps cannot load new code
+at run time (the library is converted and signed ahead of time), so `getPrivateDir()` stays
+unimplemented and the game logs `DevLib: could not resolve the private data dir, skipping`. A
+newer library is a new conversion with its own hook table: R00 asks for 453 hooks, one more than
+BASE. The link names only the newest file, so a build that wants a given one needs its own copy.
