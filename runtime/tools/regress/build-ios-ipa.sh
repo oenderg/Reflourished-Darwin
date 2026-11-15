@@ -27,8 +27,8 @@ if [ -z "${ICON_PNG:-}" ]; then
     icon_dir="$OUT/icon"
     rm -rf "$icon_dir"; mkdir -p "$icon_dir"
     echo "==> taking Reflourished's icon out of the apk"
-    unzip -o -q "$GAME_APK" "res/mipmap-xxxhdpi/pvz2_icon.png" -d "$icon_dir"
-    ICON_PNG="$icon_dir/res/mipmap-xxxhdpi/pvz2_icon.png"
+    ICON_PNG="$icon_dir/icon.png"
+    bash "$R/../scripts/app-icon.sh" "$GAME_APK" "$ICON_PNG"
 fi
 export ICON_PNG
 
