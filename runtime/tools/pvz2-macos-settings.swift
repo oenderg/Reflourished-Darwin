@@ -18,9 +18,9 @@ import SwiftUI
 private enum Key {
     static let resizeMode = "resizeMode"
     static let fixedAspect = "fixedAspect"
-    static let slots = (1...8).map { "seedSlot\($0)" }
+    static let slots = (1...10).map { "seedSlot\($0)" }
     static let shovel = "shovelKey"
-    static let defaultSlots = ["1", "2", "3", "4", "Q", "W", "E", "R"]
+    static let defaultSlots = ["1", "2", "3", "4", "Q", "W", "E", "R", "5", "T"]
     static let defaultShovel = "S"
     static let collect = "collectSunKey"
     static let defaultCollect = "Space"

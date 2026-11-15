@@ -264,14 +264,15 @@ const char *pvz2_settings_key_owner(const pvz2_settings *s, const char *name)
 /* The key fields, in the order the pages lay them out. */
 #define ID_KEY_BASE 1000
 enum {
-    FIELD_SLOT0 = 0, FIELD_SLOT7 = 7,
+    FIELD_SLOT0 = 0, FIELD_SLOT_LAST = PVZ2_SLOT_COUNT - 1,
     FIELD_SHOVEL, FIELD_PLANT_FOOD, FIELD_FAST_FORWARD,
     FIELD_POWERUP1, FIELD_POWERUP2, FIELD_POWERUP3, FIELD_COLLECT_SUN, FIELD_COUNT
 };
 static const int g_field_ids[FIELD_COUNT] = {
     ID_KEY_BASE + FIELD_SLOT0, ID_KEY_BASE + FIELD_SLOT0 + 1, ID_KEY_BASE + FIELD_SLOT0 + 2,
     ID_KEY_BASE + FIELD_SLOT0 + 3, ID_KEY_BASE + FIELD_SLOT0 + 4, ID_KEY_BASE + FIELD_SLOT0 + 5,
-    ID_KEY_BASE + FIELD_SLOT0 + 6, ID_KEY_BASE + FIELD_SLOT0 + 7,
+    ID_KEY_BASE + FIELD_SLOT0 + 6, ID_KEY_BASE + FIELD_SLOT0 + 7, ID_KEY_BASE + FIELD_SLOT0 + 8,
+    ID_KEY_BASE + FIELD_SLOT0 + 9,
     ID_KEY_BASE + FIELD_SHOVEL, ID_KEY_BASE + FIELD_PLANT_FOOD, ID_KEY_BASE + FIELD_FAST_FORWARD,
     ID_KEY_BASE + FIELD_POWERUP1, ID_KEY_BASE + FIELD_POWERUP2,
     ID_KEY_BASE + FIELD_POWERUP3, ID_KEY_BASE + FIELD_COLLECT_SUN
@@ -366,6 +367,7 @@ static const wchar_t *field_label(int field)
     static const wchar_t *labels[FIELD_COUNT] = {
         L"Seed packet 1", L"Seed packet 2", L"Seed packet 3", L"Seed packet 4",
         L"Seed packet 5", L"Seed packet 6", L"Seed packet 7", L"Seed packet 8",
+        L"Seed packet 9", L"Seed packet 10",
         L"Shovel", L"Plant food", L"Fast-forward",
         L"Power-up 1", L"Power-up 2", L"Power-up 3", L"Collect sun, coins, gems and plant food"
     };
@@ -375,7 +377,7 @@ static const wchar_t *field_label(int field)
 static void field_get(int field, char *out, size_t n)
 {
     const char *v = "";
-    if (field <= FIELD_SLOT7) v = g_pending.slot[field];
+    if (field <= FIELD_SLOT_LAST) v = g_pending.slot[field];
     else if (field == FIELD_SHOVEL) v = g_pending.shovel;
     else if (field == FIELD_PLANT_FOOD) v = g_pending.plant_food;
     else if (field == FIELD_FAST_FORWARD) v = g_pending.fast_forward;
@@ -388,7 +390,7 @@ static void field_get(int field, char *out, size_t n)
 
 static char *field_value(int field)
 {
-    if (field <= FIELD_SLOT7) return g_pending.slot[field];
+    if (field <= FIELD_SLOT_LAST) return g_pending.slot[field];
     if (field == FIELD_SHOVEL) return g_pending.shovel;
     if (field == FIELD_PLANT_FOOD) return g_pending.plant_food;
     if (field == FIELD_FAST_FORWARD) return g_pending.fast_forward;
@@ -487,21 +489,22 @@ static void key_row(HWND page, int field, int x, int y, int label_w, int key_w)
 
 static void build_keyboard_page(HWND p)
 {
-    add_ruled(p, L"BUTTON", L"Seed packets", BS_GROUPBOX, 10, 8, 500, 142, 0, W_FULL, 0);
-    for (int i = 0; i < 8; i++)
-        key_row(p, FIELD_SLOT0 + i, i < 4 ? 22 : 272, 32 + (i % 4) * 26, 96, 56);
-    add_ruled(p, L"BUTTON", L"Controls", BS_GROUPBOX, 10, 156, 500, 172, 0, W_FULL, 0);
-    key_row(p, FIELD_SHOVEL, 22, 180, 96, 56);
-    key_row(p, FIELD_PLANT_FOOD, 22, 208, 96, 56);
-    key_row(p, FIELD_FAST_FORWARD, 22, 236, 96, 56);
-    key_row(p, FIELD_POWERUP1, 272, 180, 96, 56);
-    key_row(p, FIELD_POWERUP2, 272, 208, 96, 56);
-    key_row(p, FIELD_POWERUP3, 272, 236, 96, 56);
-    key_row(p, FIELD_COLLECT_SUN, 22, 294, 346, 100);
+    add_ruled(p, L"BUTTON", L"Seed packets", BS_GROUPBOX, 10, 8, 500, 168, 0, W_FULL, 0);
+    /* Two columns of five: packets 1-5 at the left, 6-10 at the right. */
+    for (int i = 0; i < PVZ2_SLOT_COUNT; i++)
+        key_row(p, FIELD_SLOT0 + i, i < 5 ? 22 : 272, 32 + (i % 5) * 26, 96, 56);
+    add_ruled(p, L"BUTTON", L"Controls", BS_GROUPBOX, 10, 182, 500, 172, 0, W_FULL, 0);
+    key_row(p, FIELD_SHOVEL, 22, 206, 96, 56);
+    key_row(p, FIELD_PLANT_FOOD, 22, 234, 96, 56);
+    key_row(p, FIELD_FAST_FORWARD, 22, 262, 96, 56);
+    key_row(p, FIELD_POWERUP1, 272, 206, 96, 56);
+    key_row(p, FIELD_POWERUP2, 272, 234, 96, 56);
+    key_row(p, FIELD_POWERUP3, 272, 262, 96, 56);
+    key_row(p, FIELD_COLLECT_SUN, 22, 320, 346, 100);
     add_ruled(p, L"STATIC", L"Click a key field and press the key you want: letters, digits, punctuation, Space, Tab, the arrows or F1–F12. Esc cancels, Delete clears. A key can only belong to one shortcut.",
-              0, 22, 338, 476, 48, 0, W_FULL, 204);
+              0, 22, 364, 476, 48, 0, W_FULL, 204);
     /* At the right, and at the foot of the page when the page is taller. */
-    add_ruled(p, L"BUTTON", L"Restore defaults", BS_PUSHBUTTON, 390, 392, 120, 26, ID_RESTORE,
+    add_ruled(p, L"BUTTON", L"Restore defaults", BS_PUSHBUTTON, 390, 418, 120, 26, ID_RESTORE,
               A_RIGHT | A_BOTTOM, 0);
 }
 

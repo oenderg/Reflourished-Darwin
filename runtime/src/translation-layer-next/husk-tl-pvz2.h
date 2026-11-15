@@ -204,8 +204,8 @@ bool tl_pvz2_ui_geometry(int *tray, int *shovel);
 
 /* ---- the in-level key badges -------------------------------------------
  *
- * The host draws a badge on each control a shortcut works: the eight seed
- * packets, the shovel, fast-forward, plant food and up to three power-ups.
+ * The host draws a badge on each control a shortcut works: the seed packets
+ * (up to ten), the shovel, fast-forward, plant food and up to three power-ups.
  * The driver publishes where they are and whether the keys work; the host
  * supplies the labels, because it owns the key settings.
  *
@@ -222,7 +222,7 @@ bool tl_pvz2_ui_geometry(int *tray, int *shovel);
  *
  * With the feature off the driver does no guest work at all: the frame loop
  * makes one atomic load and returns. */
-#define TL_PVZ2_BADGE_SLOTS     8
+#define TL_PVZ2_BADGE_SLOTS     10
 #define TL_PVZ2_BADGE_POWERUPS  3
 
 typedef struct {
@@ -230,7 +230,7 @@ typedef struct {
     int live;
     int conveyor;                    /* the level's bank is a conveyor */
     int surface_w, surface_h;        /* the space the rectangles are in */
-    int slot_count;                  /* packets the bank has, at most 8 */
+    int slot_count;                  /* packets the bank has, at most 10 */
     int packet[TL_PVZ2_BADGE_SLOTS][4];
     int shovel[4];
     int fast_forward[4];
