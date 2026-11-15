@@ -113,6 +113,23 @@ jobs:
           ls -l "inputs/$name"
           echo "apk=$PWD/inputs/$name" >> "$GITHUB_OUTPUT"
 
+      - name: The mod's library
+        id: modlib
+        env:
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The library this game version pins (scripts/mod-lib.py). The repository's kept copy
+          # is used when there is one: the mod's own link only serves its newest library.
+          name="libRFLib-$(python3 -c "import json,glob; print(json.load(open(glob.glob('data/game-*.json')[0])).get('mod_lib',{}).get('version',''))").so"
+          id="$(gh api "repos/$REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.draft and .tag_name == \"build-inputs\") | .assets[] | select(.name == \"$name\") | .id" | head -1)"
+          [ -n "$id" ] || { echo "no $name in a build-inputs draft release: the mod's link is used"; exit 0; }
+          mkdir -p inputs
+          gh api -H "Accept: application/octet-stream" "repos/$REPOSITORY/releases/assets/$id" > "inputs/$name"
+          echo "lib=$PWD/inputs/$name" >> "$GITHUB_OUTPUT"
+
       - name: dmgbuild
         # Lays out the Mac disk image's window (scripts/make-dmg.sh, scripts/dmg/). In a venv put
         # first on PATH: the runner's Python refuses pip installs; the other scripts need only the
@@ -128,6 +145,7 @@ jobs:
         env:
           APK_URL: ${{ steps.apk.outputs.apk }}
           OBB_URL: ${{ github.event.inputs.obb_url }}
+          MOD_LIB: ${{ steps.modlib.outputs.lib }}
           PLATFORMS: ${{ github.event.inputs.platforms }}
           VARIANTS: ${{ github.event.inputs.variants }}
         run: |
@@ -147,6 +165,7 @@ jobs:
             extra=()
             [ "$variant" = slim ] && extra+=(--slim)
             [ -n "$OBB_URL" ] && extra+=(--obb "$OBB_URL")
+            [ -n "$MOD_LIB" ] && extra+=(--mod-lib "$MOD_LIB")
             ./build.sh "${platforms[@]}" ${extra[@]+"${extra[@]}"} ${reuse[@]+"${reuse[@]}"} --apk "$APK_URL" --out out
             scripts/package-release.sh out release "$variant"
             # Keep downloaded inputs and converted dylibs, not bundles or converter scratch files.
@@ -304,6 +323,18 @@ jobs:
           fi
           got="$(sha256sum inputs/pvz2.apk | cut -d' ' -f1)"
           [ "$got" = "$(json '["apk_sha256"]')" ] || { echo "the APK has sha256 $got, not the game's" >&2; exit 1; }
+          # The mod's library is the one this version pins (scripts/mod-lib.py); the repository's
+          # kept copy is used when there is one.
+          lib="libRFLib-$(python3 -c "import json; print(json.load(open('data/game-1.5.0.json')).get('mod_lib',{}).get('version',''))").so"
+          id="$(gh api "repos/$REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.draft and .tag_name == \"build-inputs\") | .assets[] | select(.name == \"$lib\") | .id" | head -1)"
+          libarg=()
+          if [ -n "$id" ]; then
+            gh api -H "Accept: application/octet-stream" "repos/$REPOSITORY/releases/assets/$id" > "inputs/$lib"
+            libarg=(--lib "inputs/$lib")
+          fi
+          python3 scripts/mod-lib.py inputs/pvz2.apk inputs/pvz2-mod.apk ${libarg[@]+"${libarg[@]}"}
+          mv inputs/pvz2-mod.apk inputs/pvz2.apk
           curl -fL --retry 3 -o inputs/1.5.0.main.tar "$(json '["cdn_url"]')"
           ls -l inputs
 

@@ -245,7 +245,7 @@ The results land in `out/`. Add `--ios` or `--mac` to build just one of them; le
 
 The game's native libraries (`libPVZ2`, the mod's `libRFLib` and their helpers) are
 translated from Android's ELF format into Mach-O dylibs at build time, with the mod's
-452 code hooks written straight into the converted code. A small host - built on
+453 code hooks written straight into the converted code. A small host - built on
 [Husk](https://github.com/leviidev/husk) - provides what Android would have: the
 JNI calls the game makes, its file system, OpenGL ES through ANGLE over Metal, audio,
 touch and keyboard input, and the app's lifecycle.
