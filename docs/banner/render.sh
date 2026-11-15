@@ -9,7 +9,7 @@
 # The inputs: mac.png (a window capture of the Mac app with its title bar, 2200x1076: a
 # 1100x506-point window on a Retina display), phone.jpg (an iPhone 18 Pro simulator shot,
 # `xcrun simctl io booted screenshot --mask=black`), settings.png (the Settings window),
-# icon.png (the APK's res/mipmap-xxxhdpi/pvz2_icon.png), pvz2-word.png and logo-word.png
+# icon.png (the game's icon, scripts/app-icon.sh), pvz2-word.png and logo-word.png
 # (the title's lettering), bg-night.webp and bg-day.webp (lawn art).
 set -euo pipefail
 cd "$(dirname "$0")"

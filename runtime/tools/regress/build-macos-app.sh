@@ -183,9 +183,8 @@ PLIST
 # The app's icon: Reflourished's own, out of the APK (as the iOS app's), cut to a Mac
 # icon's shape by tools/macos-icon.swift. ICON_PNG takes another picture.
 if [ -z "${ICON_PNG:-}" ] && [ -n "${GAME_APK:-}" ]; then
-    ICON_DIR="$(mktemp -d)"
-    unzip -o -q "$GAME_APK" "res/mipmap-xxxhdpi/pvz2_icon.png" -d "$ICON_DIR"
-    ICON_PNG="$ICON_DIR/res/mipmap-xxxhdpi/pvz2_icon.png"
+    ICON_PNG="$(mktemp -d)/icon.png"
+    bash "$R/../scripts/app-icon.sh" "$GAME_APK" "$ICON_PNG"
 fi
 if [ -n "${ICON_PNG:-}" ]; then
     [ -f "$ICON_PNG" ] || { echo "no icon at $ICON_PNG" >&2; exit 1; }
