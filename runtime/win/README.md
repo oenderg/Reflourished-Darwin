@@ -252,6 +252,17 @@ letters and digits. It has no Tab or arrow symbols, and the system symbol fonts 
 to survive the outline, so the host draws those five as filled paths (a fat arrow, and Tab's
 arrow into a bar), sheared like the Mac's italic. Without the file the labels use Segoe UI.
 
+## Import and export
+
+The game's Settings > Import/Export entries use Windows' common item dialogs,
+owned by the game window on its UI thread. Imports choose a file (quests use a
+`.zip` filter); exports suggest the game's timestamped name. Opening a picker
+leaves full screen and stays windowed afterwards. The game keeps rendering while
+the dialog is open; cancel changes nothing. Invalid levels show "Level Not Imported".
+Save imports go to the resolved saves folder's `files/No_Backup/pp.dat.imported`,
+which the game's save loader picks up on restart. The application manifest selects
+UTF-8 for Windows' narrow file APIs so the driver's paths retain Unicode names.
+
 ## Live content
 
 `husk-tl-cdn-win.c` fetches the live content over WinHTTP from the project's own CDN

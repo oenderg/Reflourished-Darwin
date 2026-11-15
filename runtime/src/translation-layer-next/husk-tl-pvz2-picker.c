@@ -36,6 +36,11 @@
 #include <time.h>
 #include <unistd.h>
 #include <zlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#define O_BINARY 0
+#endif
 
 void tl_log_line(const char *fmt, ...);
 const char *tl_data_dir(void);
@@ -120,9 +125,36 @@ static bool under_files(const char *rel, char *out, size_t n)
 
 static bool same_file(const char *a, const char *b)
 {
+#ifdef _WIN32
+    /* The CRT's inode is zero on Windows, so stat would mistake unrelated
+     * files on the same drive for the same file and silently skip the copy. */
+    HANDLE ha = CreateFileA(a, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    HANDLE hb = CreateFileA(b, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    BY_HANDLE_FILE_INFORMATION ia, ib;
+    bool same = ha != INVALID_HANDLE_VALUE && hb != INVALID_HANDLE_VALUE &&
+        GetFileInformationByHandle(ha, &ia) && GetFileInformationByHandle(hb, &ib) &&
+        ia.dwVolumeSerialNumber == ib.dwVolumeSerialNumber &&
+        ia.nFileIndexHigh == ib.nFileIndexHigh && ia.nFileIndexLow == ib.nFileIndexLow;
+    if (ha != INVALID_HANDLE_VALUE) CloseHandle(ha);
+    if (hb != INVALID_HANDLE_VALUE) CloseHandle(hb);
+    return same;
+#else
     struct stat sa, sb;
     return stat(a, &sa) == 0 && stat(b, &sb) == 0 &&
            sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+#endif
+}
+
+static int replace_file(const char *src, const char *dst)
+{
+#ifdef _WIN32
+    /* Windows' CRT rename refuses an existing destination, unlike POSIX. */
+    if (MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING)) return 0;
+    errno = EACCES;
+    return -1;
+#else
+    return rename(src, dst);
+#endif
 }
 
 static bool copy_file(const char *src, const char *dst, char *err, size_t errlen)
@@ -141,12 +173,12 @@ static bool copy_file(const char *src, const char *dst, char *err, size_t errlen
     dirname_of(dst, parent, sizeof(parent));
     mkdirs(parent);
     snprintf(tmp, sizeof(tmp), "%s.part", dst);
-    int in = open(src, O_RDONLY);
+    int in = open(src, O_RDONLY | O_BINARY);
     if (in < 0) {
         snprintf(err, errlen, "cannot open %s: %s", src, strerror(errno));
         return false;
     }
-    int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
     if (out < 0) {
         snprintf(err, errlen, "cannot write %s: %s", tmp, strerror(errno));
         close(in);
@@ -181,7 +213,7 @@ static bool copy_file(const char *src, const char *dst, char *err, size_t errlen
         snprintf(err, errlen, "cannot finish %s: %s", tmp, strerror(errno));
         ok = false;
     }
-    if (ok && rename(tmp, dst) != 0) {
+    if (ok && replace_file(tmp, dst) != 0) {
         snprintf(err, errlen, "cannot replace %s: %s", dst, strerror(errno));
         ok = false;
     }
@@ -562,7 +594,7 @@ static bool import_zip(const char *zip_path, const char *dest_rel, char *err, si
         char parent[1200];
         dirname_of(out, parent, sizeof(parent));
         mkdirs(parent);
-        int fd = open(out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int fd = open(out, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
         if (fd < 0) {
             snprintf(err, errlen, "cannot write %s: %s", out, strerror(errno));
             if (owned) free((void *)data);
@@ -692,7 +724,7 @@ static bool import_level(const char *source, const char *dest, char *err, size_t
     close(fd);
     bool ok = copy_file(source, temp, err, n);
     if (ok) ok = tl_pvz2_level_valid(temp, err, n) == 1;
-    if (ok && rename(temp, dest) != 0) {
+    if (ok && replace_file(temp, dest) != 0) {
         snprintf(err, n, "cannot replace level: %s", strerror(errno));
         ok = false;
     }

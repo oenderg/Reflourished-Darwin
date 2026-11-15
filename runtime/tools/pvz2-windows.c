@@ -88,6 +88,8 @@ int tl_win_obb_ensure(const char *data_dir, const char *exe_dir);
 #define PVZ2_WINDOW_CLASS L"PvZ2Reflourished"
 /* A second start asks the running game to do one of these. */
 #define PVZ2_WM_START_ACTION (WM_APP + 19)
+#define PVZ2_WM_PICK_FILE (WM_APP + 20)
+#define PVZ2_WM_LEVEL_REJECTED (WM_APP + 21)
 #define PVZ2_REQUEST_MAGIC 0x50565A32u
 
 static int g_sw = DESIGN_W, g_sh = DESIGN_H;
@@ -535,6 +537,79 @@ static void toggle_fullscreen(int on)
 }
 
 /* ------------------------------------------------------------- the windows */
+
+typedef struct {
+    int kind;
+    wchar_t suggested[256];
+} picker_request;
+
+/* The worker owns the game's request until an answer arrives. Copy its name
+ * before posting, and never wait for the window thread from that worker. */
+static void file_picker_open(int kind, const char *internal, const char *suggested, const char *prepared)
+{
+    (void)internal; (void)prepared;
+    picker_request *r = calloc(1, sizeof(*r));
+    if (!r) { tl_pvz2_file_picker_answer(NULL); return; }
+    r->kind = kind;
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, suggested ? suggested : "", -1,
+                             r->suggested, 256) ||
+        !PostMessageW(g_hwnd, PVZ2_WM_PICK_FILE, 0, (LPARAM)r)) {
+        free(r);
+        tl_pvz2_file_picker_answer(NULL);
+    }
+}
+
+static void level_rejected(void)
+{
+    PostMessageW(g_hwnd, PVZ2_WM_LEVEL_REJECTED, 0, 0);
+}
+
+static void file_picker_show(picker_request *r)
+{
+    int importing = r->kind == TL_PVZ2_PICK_IMPORT_FILE || r->kind == TL_PVZ2_PICK_IMPORT_TO_DIR ||
+                    r->kind == TL_PVZ2_PICK_IMPORT_ZIP;
+    IFileDialog *dialog = NULL;
+    /* Leaving borderless full screen keeps the owned dialog reachable on every
+     * display. Show pumps the UI messages, not the independent render thread. */
+    toggle_fullscreen(0);
+    HRESULT hr = CoCreateInstance(importing ? &CLSID_FileOpenDialog : &CLSID_FileSaveDialog,
+                                   NULL, CLSCTX_INPROC_SERVER, &IID_IFileDialog, (void **)&dialog);
+    if (SUCCEEDED(hr)) {
+        FILEOPENDIALOGOPTIONS options = 0;
+        hr = dialog->lpVtbl->GetOptions(dialog, &options);
+        if (SUCCEEDED(hr)) hr = dialog->lpVtbl->SetOptions(dialog, options | FOS_FORCEFILESYSTEM |
+            FOS_NOCHANGEDIR | FOS_PATHMUSTEXIST | (importing ? FOS_FILEMUSTEXIST : FOS_OVERWRITEPROMPT));
+        if (SUCCEEDED(hr)) hr = dialog->lpVtbl->SetTitle(dialog,
+            importing ? L"Import into PvZ2 Reflourished" : L"Export from PvZ2 Reflourished");
+        if (SUCCEEDED(hr) && !importing) hr = dialog->lpVtbl->SetFileName(dialog, r->suggested);
+        if (SUCCEEDED(hr) && r->kind == TL_PVZ2_PICK_IMPORT_ZIP) {
+            COMDLG_FILTERSPEC filter = { L"Quests zip (*.zip)", L"*.zip" };
+            hr = dialog->lpVtbl->SetFileTypes(dialog, 1, &filter);
+        }
+        tl_log_line("windows: file picker: showing the %s dialog over the game", importing ? "open" : "save");
+        if (SUCCEEDED(hr)) hr = dialog->lpVtbl->Show(dialog, g_hwnd);
+    }
+    char path[1400] = "";
+    if (SUCCEEDED(hr)) {
+        IShellItem *item = NULL;
+        hr = dialog->lpVtbl->GetResult(dialog, &item);
+        if (SUCCEEDED(hr)) {
+            PWSTR wide = NULL;
+            hr = item->lpVtbl->GetDisplayName(item, SIGDN_FILESYSPATH, &wide);
+            if (SUCCEEDED(hr)) {
+                if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, path, sizeof(path), NULL, NULL))
+                    hr = HRESULT_FROM_WIN32(GetLastError());
+                CoTaskMemFree(wide);
+            }
+            item->lpVtbl->Release(item);
+        }
+    }
+    if (dialog) dialog->lpVtbl->Release(dialog);
+    if (SUCCEEDED(hr)) slashes(path);
+    tl_log_line("windows: file picker: %s (%08lx)", SUCCEEDED(hr) ? path : "cancelled or failed", (unsigned long)hr);
+    tl_pvz2_file_picker_answer(SUCCEEDED(hr) ? path : NULL);
+    free(r);
+}
 
 static void settings_applied(void *user, const pvz2_settings *s)
 {
@@ -3245,6 +3320,14 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP_POINTER_ART:
         pointer_art_done((pointer_art_result *)lp);
         return 0;
+    case PVZ2_WM_PICK_FILE:
+        file_picker_show((picker_request *)lp);
+        return 0;
+    case PVZ2_WM_LEVEL_REJECTED:
+        toggle_fullscreen(0);
+        MessageBoxW(h, L"Choose a valid JSON level file. The existing level was not changed.",
+                    L"Level Not Imported", MB_OK | MB_ICONWARNING);
+        return 0;
     case WM_APP_POINTER_TICK:
         {
             LONGLONG began = pointer_clock_100ns();
@@ -3971,6 +4054,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     if (!g_hwnd) { tl_log_line("windows: CreateWindow failed (%lu)", GetLastError()); return 1; }
     pvz2_window_app_id(g_hwnd);
     tl_win_darkmode_title(g_hwnd);
+    static const tl_pvz2_file_picker_hooks picker_hooks = { .open = file_picker_open, .level_rejected = level_rejected };
+    tl_pvz2_set_file_picker_hooks(&picker_hooks);
     /* The updater, in the installed build only, after the settings say whether
      * it checks by itself. */
     pvz2_updates_init(g_hwnd, g_settings.automatic_updates);
