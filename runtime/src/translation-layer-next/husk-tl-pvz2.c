@@ -3736,13 +3736,27 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
      * card, ShovelCursor 0x24d8b60 for the shovel) -- and the comparison is
      * against the *runtime* address, because in this process the guest's
      * data lives in the converted library. */
-    uint64_t vtable = 0;
+    uint64_t vtable = 0, first_slot = 0;
     void *want_vtable = tl_aot_guest_data_ptr_any(want_vtable_vaddr);
-    if (!guest_read_bytes(cursor, &vtable, sizeof vtable) || !want_vtable ||
-        vtable != (uint64_t)(uintptr_t)want_vtable) {
-        tl_log_line("pvz2: %s: the new cursor is not the game's own cursor (vtable %p, want %p)",
-                    what, (void *)vtable, want_vtable);
+    if (!guest_read_bytes(cursor, &vtable, sizeof vtable) || !vtable) {
+        tl_log_line("pvz2: %s: the new cursor has no vtable", what);
         return -1;
+    }
+    if (!want_vtable || vtable != (uint64_t)(uintptr_t)want_vtable) {
+        /* Another class of cursor: a packet's press can build one in a level the
+         * checks did not meet (issue #33's log: a vtable outside libPVZ2's data, in
+         * Holiday Mashup). Leaving it where the press put it is the one wrong
+         * answer -- it stays in the active vector with an unbound token, and the
+         * next lawn click dies on the null pending cursor -- so it goes through the
+         * same release, which the plant's and the shovel's cursors both use. A
+         * vtable whose first slot cannot be read is not a cursor at all. */
+        if (!guest_read_bytes(vtable, &first_slot, sizeof first_slot) || !first_slot) {
+            tl_log_line("pvz2: %s: the new cursor is not a cursor (vtable %p, want %p)",
+                        what, (void *)vtable, want_vtable);
+            return -1;
+        }
+        tl_log_line("pvz2: %s: the new cursor is another class (vtable %p, want %p); released the same way",
+                    what, (void *)vtable, want_vtable);
     }
     void *release = guest_code(GUEST_CURSOR_RELEASE);
     bool call_ok = false;
