@@ -269,7 +269,7 @@ static DWORD WINAPI run(void *p)
     job *j = p;
     tl_cdn_response *r = NULL;
     char why[160] = "";
-    static const char *const suffix = "/cdn/1.4.2.main.tar";
+    static const char *const suffix = "/cdn/1.5.0.main.tar";
     size_t url_len = strlen(j->url), suffix_len = strlen(suffix);
     bool wanted = url_len >= suffix_len && !strcmp(j->url + url_len - suffix_len, suffix);
     if (tl_cdn_allowed_url(j->url) && wanted)

@@ -4,7 +4,7 @@
  *
  * A slim copy carries no OBB (1.3 GB of the game's assets), so the first start
  * downloads it from the link the Mac build uses (pvz2-obb-win.h, from
- * data/game-1.4.2.json), checks its size and sha256, and only then starts the
+ * data/game-1.5.0.json), checks its size and sha256, and only then starts the
  * game. The file goes where the game looks first,
  * <data>/sdcard/Android/obb/com.ea.game.pvz2_rfl/<name>, through a .part file
  * and an atomic move. A stopped download keeps its .part and the next try asks

@@ -2,11 +2,11 @@
 # Stage the two architectures for the Windows setup program and (with --zip) the file to carry
 # them to a Windows PC, where runtime\win\installer\build-installer.cmd runs Inno Setup on it.
 #
-#   runtime/win/installer/build-installer.sh --apk "PvZ2 Reflourished 1.4.2.apk" [--tar FILE]
+#   runtime/win/installer/build-installer.sh --apk "PvZ2 Reflourished 1.5.0.apk" [--tar FILE]
 #
 # Options:
 #   --apk FILE         the game's APK, put in Game/ (required)
-#   --tar FILE         the CDN archive, put in Game/1.4.2.main.tar (optional)
+#   --tar FILE         the CDN archive, put in Game/1.5.0.main.tar (optional)
 #   --version V        the setup program's version (default: VERSION)
 #   --angle DIR        libEGL.dll and libGLESv2.dll for both architectures (default:
 #                      prebuilt/win-arm64 and prebuilt/win-x64)
@@ -63,7 +63,7 @@ stage_common() {
     [ -f "$REPO/runtime/tools/fonts/level-ui.ttf" ] && cp "$REPO/runtime/tools/fonts/level-ui.ttf" "$dir/"
     if [ -n "$TAR" ]; then
         [ -f "$TAR" ] || { echo "build-installer: no CDN archive at $TAR" >&2; exit 2; }
-        cp "$TAR" "$dir/Game/1.4.2.main.tar"
+        cp "$TAR" "$dir/Game/1.5.0.main.tar"
     fi
     cat > "$dir/README.txt" <<'EOF'
 PvZ2: Reflourished for Windows
@@ -133,7 +133,7 @@ mkdir -p "$OUT"
 stage_arm64 "$OUT"
 stage_x64 "$OUT"
 printf '%s\n' "$VERSION" > "$OUT/version.txt"
-python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO/data/game-1.4.2.json" > "$OUT/game-version.txt"
+python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO/data/game-1.5.0.json" > "$OUT/game-version.txt"
 printf '%s\n' "$(cat "$REPO/prebuilt/winsparkle/.zip-sha256" 2>/dev/null)" > "$OUT/winsparkle-sha256.txt"
 
 if [ "$MAKE_ZIP" = 1 ]; then

@@ -96,7 +96,7 @@ What to check:
   `activequests` folders (the game may rewrite its quest save on exit, so compare right after
   the import or use the log's file count).
 - **Import Level**: import a known level JSON; it lands byte-identical at
-  `No_Backup/CDN.1.4.2/levels/egypt1.json`. Import a profile save or malformed JSON and
+  `No_Backup/CDN.1.5.0/levels/egypt1.json`. Import a profile save or malformed JSON and
   confirm it is rejected, the prior level is unchanged, and an alert appears. Restart with
   an invalid override and check that it is preserved under an `.invalid.N` name.
   The level check does not validate every guest reference or guarantee a custom level loads.
@@ -115,7 +115,7 @@ Use a full test build and a copied save. An online launch should log
 `TL_PVZ2_CDN=offline`, expect `CDN fallback (forced offline) -> local copy, Date ...`
 and no network request. Check both the world-map badges and the Promoted shop offers;
 plant ownership, profile unlocks and previous purchases still govern availability.
-Compare the cache's gzip hash with the guest's `CDN.1.4.2/` files after extraction.
+Compare the cache's gzip hash with the guest's `CDN.1.5.0/` files after extraction.
 
 With the lid closed, allow extra time for frames and taps. Use `TL_PVZ2_FRAMES` if window
 capture is unavailable, and inspect `latest.bmp` yourself; low fps alone is not a failure.
@@ -275,7 +275,7 @@ The iPhone's screen (the Dynamic Island, the rounded corners) without an iPhone,
 Apple-silicon Mac with Xcode's iOS Simulator and an iOS runtime installed:
 
 ```sh
-./build.sh --ios-sim --slim --apk "PvZ2 Reflourished 1.4.2.apk"
+./build.sh --ios-sim --slim --apk "PvZ2 Reflourished 1.5.0.apk"
 ```
 
 This builds `out/PvZ2-Reflourished-sim.app`, ad-hoc signed with no entitlements (a signature

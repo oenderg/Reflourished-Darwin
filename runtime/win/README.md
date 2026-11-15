@@ -28,7 +28,7 @@ host (`runtime/tools/pvz2-windows.c`), the settings window
 zip's program: the same sources with no updater at all. The installed one links WinSparkle
 (`prebuilt/winsparkle/arm64`, fetched by `runtime/win/fetch-winsparkle.sh`) and needs
 `WinSparkle.dll` beside it; the portable one neither links nor ships it. Both need `libEGL.dll`
-and `libGLESv2.dll` (ANGLE) beside them, and `Game/pvz2.apk` (with `Game/1.4.2.main.tar` when
+and `libGLESv2.dll` (ANGLE) beside them, and `Game/pvz2.apk` (with `Game/1.5.0.main.tar` when
 the APK is the slim one).
 
 The x64 program (`runtime/win/x64/build-x64.sh`) takes the same `game`/`game-portable` targets
@@ -230,7 +230,7 @@ that link without opening it, as on the Mac, for tests.
 
 A Windows zip carries no OBB (the game's 1.3 GB of assets), so the first start downloads it
 before the game runs, as the Mac and iPad slim apps do: from the link in
-`runtime/win/pvz2-obb-win.h` (the first `obb_urls` entry in `data/game-1.4.2.json`, which the
+`runtime/win/pvz2-obb-win.h` (the first `obb_urls` entry in `data/game-1.5.0.json`, which the
 Mac build writes into its Info.plist), checked against the same size and sha256, and put in
 `<data>/sdcard/Android/obb/com.ea.game.pvz2_rfl/` through a `.part` file and an atomic move.
 A small window shows the progress and a Cancel button; a failure explains itself and offers
@@ -255,7 +255,7 @@ arrow into a bar), sheared like the Mac's italic. Without the file the labels us
 ## Live content
 
 `husk-tl-cdn-win.c` fetches the live content over WinHTTP from the project's own CDN
-(`https://reflourished.ducnguyen.org/cdn/1.4.2.main.tar`), with the Mac client's rules:
+(`https://reflourished.ducnguyen.org/cdn/1.5.0.main.tar`), with the Mac client's rules:
 only that host on https port 443, no redirects, 30 s without data and 60 s in total, the
 server's `Date` required, and the body must be a complete gzip archive before it replaces
 the saved copy atomically. A failed fetch answers with the saved archive dated now.
@@ -344,7 +344,7 @@ running, Setup offers to close it, and a close from another program skips the ga
 
 ## Zips
 
-`runtime/win/package-zip.sh --arch all --apk <apk> [--tar <1.4.2.main.tar>]` makes
+`runtime/win/package-zip.sh --arch all --apk <apk> [--tar <1.5.0.main.tar>]` makes
 `out/zips/PvZ2-Reflourished-<game>-Darwin-<version>-Windows-{ARM64,x64}.zip`: the portable program, ANGLE and
 its license, a `licenses` folder (below), `Game/` (the APK and the CDN archive), a `portable` file and a README. The
 `portable` file is what makes the program keep everything in `data\` beside the .exe (saves,

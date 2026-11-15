@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Reflourished 1.4.2's preview art, read from the player's OBB.
+ * Reflourished 1.5.0's preview art, read from the player's OBB.
  *
  * The OBB is the same 1bsr file the game and the Mac build read. The manifest
  * group holds an RTON stream naming each group and resource with its atlas

@@ -19,7 +19,7 @@ if minor >= 100 or patch >= 100:
 build = os.environ.get("APP_BUILD") or str(major * 10000 + minor * 100 + patch)
 if not re.fullmatch(r"[1-9][0-9]*", build):
     sys.exit("APP_BUILD must be a positive integer")
-game = json.loads((root / "data/game-1.4.2.json").read_text())["version"]
+game = json.loads((root / "data/game-1.5.0.json").read_text())["version"]
 print(version, build, game)
 PY
 )" || return 1

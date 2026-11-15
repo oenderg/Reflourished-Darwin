@@ -9,7 +9,7 @@
 # (the IPA is about 60 MB, the Mac disk image about 65 MB): they download it themselves
 # on their first launch. --quick reuses the game's converted code from the last
 # build in the same --out and skips the disk image: the fast loop while working
-# on runtime/. VERSION sets our version; data/game-1.4.2.json sets the game version.
+# on runtime/. VERSION sets our version; data/game-1.5.0.json sets the game version.
 # --reuse-converted reuses the converted code but still makes the disk image (release variants).
 # scripts/package-release.sh gives the IPA and DMG their versioned release names.
 # APP_BUILD overrides the build number (default: major*10000 + minor*100 + patch).
@@ -51,8 +51,8 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 WORK="$OUT/.work"
 mkdir -p "$WORK"
-GAME="$ROOT/data/game-1.4.2.json"
-HOOKS="$ROOT/data/hooks-1.4.2.json"
+GAME="$ROOT/data/game-1.5.0.json"
+HOOKS="$ROOT/data/hooks-1.5.0.json"
 json() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))" "$GAME" "$1"; }
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
@@ -76,10 +76,10 @@ if [ "$NEED_OBB" = 1 ]; then
     OBB="$(fetch "$OBB" "$WORK/game.obb")"
 fi
 if [ -z "$CDN" ]; then
-    CDN="$WORK/1.4.2.main.tar"
+    CDN="$WORK/1.5.0.main.tar"
     [ -s "$CDN" ] || curl -fL --retry 3 -o "$CDN" "$(json 'd["cdn_url"]')"
 else
-    CDN="$(fetch "$CDN" "$WORK/1.4.2.main.tar")"
+    CDN="$(fetch "$CDN" "$WORK/1.5.0.main.tar")"
 fi
 
 # The mod's hooks were recorded against one exact build of the game's code, so the

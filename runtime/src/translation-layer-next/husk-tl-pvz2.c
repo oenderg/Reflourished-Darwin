@@ -1054,7 +1054,7 @@ static void J_http_start(tl_jcall *c)
         http_complete(token, NULL);
     } else {
         const char *path = getenv("TL_PVZ2_MAIN_TAR");
-        if (!path) { snprintf(local, sizeof local, "%s/No_Backup/1.4.2.main.tar", P.data); path = local; }
+        if (!path) { snprintf(local, sizeof local, "%s/No_Backup/1.5.0.main.tar", P.data); path = local; }
         tl_cdn_fetch(url, method, body, length, path, token, http_complete);
     }
     free(body);

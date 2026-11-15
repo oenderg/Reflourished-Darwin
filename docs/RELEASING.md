@@ -105,7 +105,7 @@ the Mac update feed `sparkle/appcast.xml` (`chore(sparkle): ...`), and does the 
 
 ## Versions
 
-- `VERSION` holds our semver (`1.0.0`, the first release). `data/game-1.4.2.json` holds the game's version.
+- `VERSION` holds our semver (`1.0.0`, the first release). `data/game-1.5.0.json` holds the game's version.
 - Both apps use our version for `CFBundleShortVersionString` and the game's for `PVZ2GameVersion`.
   Mac Settings > About shows both.
 - `CFBundleVersion` is `major*10000 + minor*100 + patch`: `1.0.0` is build `10000`. Minor and patch

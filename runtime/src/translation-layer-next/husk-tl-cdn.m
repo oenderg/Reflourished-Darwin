@@ -212,7 +212,7 @@ void tl_cdn_fetch(const char *url, const char *method, const void *body, size_t 
     @autoreleasepool {
         PVCdnFetch *fetch = [PVCdnFetch new];
         fetch.url = @(url);
-        fetch.cache = cache_path && [[[NSURL URLWithString:fetch.url] path] isEqualToString:@"/cdn/1.4.2.main.tar"] ? @(cache_path) : nil;
+        fetch.cache = cache_path && [[[NSURL URLWithString:fetch.url] path] isEqualToString:@"/cdn/1.5.0.main.tar"] ? @(cache_path) : nil;
         fetch.token = token; fetch.completion = completion; fetch.data = [NSMutableData new];
         if (!tl_cdn_allowed_url(url)) { completion(token, NULL); return; }
         const char *mode = getenv("TL_PVZ2_CDN");

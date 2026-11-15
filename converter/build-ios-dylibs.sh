@@ -19,7 +19,7 @@
 # plus a .facts file beside each dylib: the symbol map the runtime needs, because the
 # guest's names live inside the image as bytes rather than in a symbol table.
 #
-# The mod's 290 inline hooks are baked into libPVZ2 as well. A device's code is signed
+# The mod's inline hooks (452 in 1.5.0) are baked into libPVZ2 as well. A device's code is signed
 # and read-only, so the branches the mod would write at start-up cannot be written there;
 # they are written here instead, into libPVZ2's own text, before the signature. Set
 # HOOKS=<the frozen hook table> to bake them; without it the build has no hooks and the
@@ -83,7 +83,10 @@ echo "    $(xcrun nm -g "$OUT/libbionic-shim.dylib" | awk '$2 ~ /^[TDRB]$/' | wc
 convert() {
     local so="$1" index="$2"; shift 2
     local dylib="$OUT/$so.dylib"
-    [ -f "$dylib" ] && [ -z "${FORCE:-}" ] && { echo "==> $so.dylib is already there"; return; }
+    # A dylib older than the hook table was baked from another table: convert it again.
+    if [ -f "$dylib" ] && [ -z "${FORCE:-}" ] && { [ -z "$HOOKS" ] || [ ! "$HOOKS" -nt "$dylib" ]; }; then
+        echo "==> $so.dylib is already there"; return
+    fi
     echo "==> converting $so.so for $TARGET"
     set +e
     python3 "$R/aot-convert.py" "$LIB/$so.so" -o "$OUT" --target "$TARGET" \
@@ -103,7 +106,7 @@ convert() {
 # the build: the shim keeps one thread-local word per library and the stub names its own.
 convert libc++_shared 0
 convert libNimble 1
-# The mod's hooks are baked into libPVZ2, which is where all 290 sites are. The table is
+# The mod's hooks are baked into libPVZ2, which is where all the sites are. The table is
 # the frozen one (the mod's own, produced by scripts/aot-hooks.py from a codewrite log);
 # HOOKS names it. Without it the device build would ship a game whose hooks are never
 # applied, which is the state the Mac route was in before the bake.

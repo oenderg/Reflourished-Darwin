@@ -8,7 +8,7 @@
  *
  * Where things are (each overridable for tests):
  *   the APK          Game/pvz2.apk next to the program        (TL_PVZ2_APK)
- *   the CDN archive  Game/1.4.2.main.tar next to the program  (TL_PVZ2_MAIN_TAR)
+ *   the CDN archive  Game/1.5.0.main.tar next to the program  (TL_PVZ2_MAIN_TAR)
  *   ANGLE            libEGL.dll and libGLESv2.dll next to it  (TL_ANGLE_EGL, TL_ANGLE_GLES)
  *   the data folder  %LOCALAPPDATA%/PvZ2 Reflourished          (TL_DATA): the OBB,
  *                    the CDN archive, the x64 cache and pvz2.log
@@ -3940,9 +3940,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     /* The CDN fallback archive, staged into the data folder unless a newer download is there. */
     {
         char bundled[MAX_PATH + 32], cached[MAX_PATH + 32], dir[MAX_PATH + 32];
-        join(bundled, sizeof(bundled), g_exe_dir, "Game/1.4.2.main.tar");
+        join(bundled, sizeof(bundled), g_exe_dir, "Game/1.5.0.main.tar");
         join(dir, sizeof(dir), g_data, "No_Backup"); tl_win_mkdirs(dir);
-        join(cached, sizeof(cached), g_data, "No_Backup/1.4.2.main.tar");
+        join(cached, sizeof(cached), g_data, "No_Backup/1.5.0.main.tar");
         if (!getenv("TL_PVZ2_MAIN_TAR")) { tl_cdn_stage(bundled, cached); _putenv_s("TL_PVZ2_MAIN_TAR", cached); }
     }
 

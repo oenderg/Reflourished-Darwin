@@ -31,7 +31,7 @@ is signed like any other library. On the device nothing writes code.
 - turns ELF relocations into assembler expressions, so `ld64` writes the rebase/bind information;
 - rewrites what Darwin forbids or lays out differently: thread-pointer reads (`mrs tpidr_el0`) point
   at a fake thread block, and uses of register x18 (reserved on Apple platforms) go through stubs;
-- bakes in the mod's **290 inline hooks** (`data/hooks-1.4.2.json`). On Android, `libRFLib` patches
+- bakes in the mod's **452 inline hooks** (`data/hooks-1.5.0.json`). On Android, `libRFLib` patches
   `libPVZ2`'s function prologues at start-up; here those branches are written into the dylib ahead
   of time, and the mod's hook API becomes a lookup. Without the table the game never draws a frame.
 - writes a `.facts` file (the guest's symbol names, which live inside the image as bytes) and a

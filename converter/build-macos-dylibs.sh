@@ -2,7 +2,7 @@
 # Convert the guest libraries for the Mac: each .so becomes a signed arm64 Mach-O
 # dylib, with every load-time rewrite baked in -- the thread-block references, the
 # PC-relative pairs into data, the stubs for the reserved register -- and the mod's
-# 290 inline hooks baked into libPVZ2.
+# inline hooks (452 in 1.5.0) baked into libPVZ2.
 #
 #   scripts/build-macos-dylibs.sh [apk|lib-dir] [out-dir]
 #
@@ -20,7 +20,7 @@
 # plus a .facts file beside each dylib: the symbol map the runtime needs, because the
 # guest's names live inside the image as bytes rather than in a symbol table.
 #
-# HOOKS names the frozen hook table. Without it the build ships a game whose 290 mod
+# HOOKS names the frozen hook table. Without it the build ships a game whose mod
 # hooks are never applied, and the game waits for hooks that never arrive.
 #
 # GLES names ANGLE's libGLESv2: the guest's libraries are linked against it, so the
@@ -73,7 +73,10 @@ SHIM=(--shim "$WORK/shim/libbionic-shim.dylib" --shim=-lz)
 convert() {
     local so="$1" index="$2"; shift 2
     local dylib="$OUT/$so.dylib"
-    if [ -f "$dylib" ] && [ -z "${FORCE:-}" ]; then echo "==> $so.dylib is already there"; return; fi
+    # A dylib older than the hook table was baked from another table: convert it again.
+    if [ -f "$dylib" ] && [ -z "${FORCE:-}" ] && { [ -z "$HOOKS" ] || [ ! "$HOOKS" -nt "$dylib" ]; }; then
+        echo "==> $so.dylib is already there"; return
+    fi
     echo "==> converting $so.so"
     set +e
     python3 "$R/aot-convert.py" "$LIB/$so.so" -o "$OUT" --target "$TARGET" \

@@ -7,7 +7,7 @@ request looks like. If you use an AI agent, point it at [AGENTS.md](AGENTS.md).
 
 - A Mac with Apple silicon and Xcode (with its iOS platform, for iPhone/iPad builds), python3,
   about 8 GB free.
-- The **PvZ2 Reflourished 1.4.2 APK** from the mod's official downloads. `build.sh` checks that it
+- The **PvZ2 Reflourished 1.5.0 APK** from the mod's official downloads. `build.sh` checks that it
   is exactly that build. The game's OBB (1.3 GB) is downloaded for you, or by the slim apps themselves.
 - For trying things on an iPhone/iPad: a sideloader (AltStore, SideStore, Sideloadly, LiveContainer)
   or your own signing identity.
@@ -15,9 +15,9 @@ request looks like. If you use an AI agent, point it at [AGENTS.md](AGENTS.md).
 ## The loop
 
 ```sh
-./build.sh --mac --apk "PvZ2 Reflourished 1.4.2.apk"            # first time: converts the game's code
+./build.sh --mac --apk "PvZ2 Reflourished 1.5.0.apk"            # first time: converts the game's code
 # ... edit runtime/ ...
-./build.sh --mac --quick --apk "PvZ2 Reflourished 1.4.2.apk"    # rebuilds the app only, in seconds
+./build.sh --mac --quick --apk "PvZ2 Reflourished 1.5.0.apk"    # rebuilds the app only, in seconds
 ```
 
 - `--quick` reuses the converted libraries in `out/.work`. Drop it when you change `converter/` or
@@ -32,7 +32,7 @@ request looks like. If you use an AI agent, point it at [AGENTS.md](AGENTS.md).
   writes to its `TL_PVZ2_LOG` instead), and `Documents/pvz2.log` on iOS (Files app: On My iPhone >
   PvZ2 Reflourished). Each launch starts a new one; the run before is `pvz2.previous.log` next to it.
 
-Our app version is in `VERSION`; the game version is in `data/game-1.4.2.json`. Local file names
+Our app version is in `VERSION`; the game version is in `data/game-1.5.0.json`. Local file names
 stay the same. For versioned release names and packaging, see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Where to make a change
