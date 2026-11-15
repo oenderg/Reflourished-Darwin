@@ -2554,6 +2554,10 @@ bool tl_pvz2_start(const tl_ga_config *cfg)
     /* The host's own folders for those guest paths: on the Mac and iPad they
      * are the data folder itself; the Windows host gives the app's files (the
      * saves) a folder of their own, beside the player's settings. */
+    /* The data folder first: tl_path_resolve answers from it, and while it was unset (the
+     * iPad gets here before the Java side has told it) every folder below resolved under
+     * /tmp -- so Import/Export looked for the save in /tmp/sdcard and found nothing. */
+    tl_set_data_dir(P.data);
     { char d[900], obb[900], cache_guest[600];
       tl_path_resolve(P.obb_guest, obb, sizeof(obb));
       snprintf(P.obb_host, sizeof(P.obb_host), "%s", obb);
@@ -2564,7 +2568,6 @@ bool tl_pvz2_start(const tl_ga_config *cfg)
       snprintf(cache_guest, sizeof(cache_guest), "/sdcard/Android/obb/%s", PKG);
       tl_path_resolve(cache_guest, d, sizeof(d)); mkdirs(d); }
 
-    tl_set_data_dir(P.data);
     tl_log_line("pvz2: Info_SysGetProductVersion()I -> %d", PVZ2_ANDROID_VERSION_CODE);
     tl_log_line("pvz2: Info_SysGetProductVersionString() -> %s", PVZ2_ANDROID_VERSION_NAME);
     struct statfs startup_fs;
