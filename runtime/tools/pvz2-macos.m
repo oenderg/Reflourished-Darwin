@@ -18,7 +18,7 @@
  *     Contents/Frameworks/libEGL.dylib   ANGLE: the EGL the driver needs on a Mac
  *     Contents/Game/pvz2.apk              the game's APK (the Java half)
  *     Contents/Game/obb/*.obb             the game's expansion file (its assets)
- *     Contents/Game/1.4.2.main.tar        the mod's CDN archive
+ *     Contents/Game/1.5.0.main.tar        the mod's CDN archive
  *
  * The writable state is in ~/Library/Application Support/PvZ2 Reflourished (the guest's
  * own files under sdcard/, its saves under No_Backup/, its settings under config/),
@@ -365,8 +365,8 @@ static void mkdirs(NSString *path)
 static NSString *stage_cdn_tar(void)
 {
     if (getenv("TL_PVZ2_MAIN_TAR")) return @(getenv("TL_PVZ2_MAIN_TAR"));
-    NSString *local = [@(g_data) stringByAppendingPathComponent:@"No_Backup/1.4.2.main.tar"];
-    tl_cdn_stage(bundle_dir(@"Game/1.4.2.main.tar").UTF8String, local.UTF8String);
+    NSString *local = [@(g_data) stringByAppendingPathComponent:@"No_Backup/1.5.0.main.tar"];
+    tl_cdn_stage(bundle_dir(@"Game/1.5.0.main.tar").UTF8String, local.UTF8String);
     setenv("TL_PVZ2_MAIN_TAR", local.UTF8String, 1);
     return local;
 }

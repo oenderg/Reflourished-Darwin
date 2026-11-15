@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       apk_url:
-        description: "Link to the PvZ2 Reflourished 1.4.2 APK (direct, Google Drive or MEGA; Windows takes direct links only); empty: the repository's own copy (the build-inputs draft release)"
+        description: "Link to the PvZ2 Reflourished 1.5.0 APK (direct, Google Drive or MEGA; Windows takes direct links only); empty: the repository's own copy (the build-inputs draft release)"
         required: false
         default: ""
       obb_url:
-        description: "Link to the OBB (leave empty: the mod's own 1.4.2 OBB is used)"
+        description: "Link to the OBB (leave empty: the mod's own 1.5.0 OBB is used)"
         required: false
         default: ""
       platforms:
@@ -288,7 +288,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$PATH:/c/Program Files/GitHub CLI"
-          json() { python3 -c "import json,sys; print(json.load(open('data/game-1.4.2.json'))$1)"; }
+          json() { python3 -c "import json,sys; print(json.load(open('data/game-1.5.0.json'))$1)"; }
           mkdir -p inputs
           if [ -n "$APK_URL" ]; then
             case "$APK_URL" in *drive.google.*|*mega.*)
@@ -304,7 +304,7 @@ jobs:
           fi
           got="$(sha256sum inputs/pvz2.apk | cut -d' ' -f1)"
           [ "$got" = "$(json '["apk_sha256"]')" ] || { echo "the APK has sha256 $got, not the game's" >&2; exit 1; }
-          curl -fL --retry 3 -o inputs/1.4.2.main.tar "$(json '["cdn_url"]')"
+          curl -fL --retry 3 -o inputs/1.5.0.main.tar "$(json '["cdn_url"]')"
           ls -l inputs
 
       - name: ScarletNX cache
@@ -335,7 +335,7 @@ jobs:
           runtime/win/fetch-angle.sh all
 
       - name: Stage the setup
-        run: runtime/win/installer/build-installer.sh --apk inputs/pvz2.apk --tar inputs/1.4.2.main.tar
+        run: runtime/win/installer/build-installer.sh --apk inputs/pvz2.apk --tar inputs/1.5.0.main.tar
 
       - name: The setup (Inno Setup)
         shell: cmd
@@ -344,7 +344,7 @@ jobs:
       - name: The portable zips
         run: |
           set -euo pipefail
-          runtime/win/package-zip.sh --arch all --apk inputs/pvz2.apk --tar inputs/1.4.2.main.tar \
+          runtime/win/package-zip.sh --arch all --apk inputs/pvz2.apk --tar inputs/1.5.0.main.tar \
             --x64-runtime out/win/x64-runtime --out out/win-release
           ls -l out/win-release
           sha256sum out/win-release/*

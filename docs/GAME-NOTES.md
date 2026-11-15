@@ -1,8 +1,8 @@
-# Game notes (Reflourished 1.4.2)
+# Game notes (Reflourished 1.5.0)
 
 What the game does that is not obvious, and the places in its code the driver relies on. Every
 address here is a **guest virtual address in `libPVZ2.so` of the 1.4.2 build** (the one
-`data/game-1.4.2.json` pins); a different build moves them all ([NEW-GAME-VERSION.md](NEW-GAME-VERSION.md)).
+`data/game-1.5.0.json` pins); a different build moves them all ([NEW-GAME-VERSION.md](NEW-GAME-VERSION.md)).
 The driver turns them into callable pointers with `guest_code()` (code) and
 `tl_aot_guest_data_ptr_any()` (data, e.g. vtables), and calls the game only on its own thread,
 through a guard that turns a fault into a log line instead of a crash.
@@ -245,7 +245,7 @@ The paths are the ones libRFLib passes, relative to Android's
 | Export Save | `exportFile` | `No_Backup/pp.dat` (suggested name `pp_<timestamp>.dat`) |
 | Import Quests | `importZip` | `No_Backup` (the zip's entries are extracted there) |
 | Export Quests | `exportFolder` | `No_Backup/activequests` (zipped, suggested `activequests_<timestamp>.zip`, entries `activequests/...`) |
-| Import Level | `importFile` | `No_Backup/CDN.1.4.2/levels/egypt1.json` |
+| Import Level | `importFile` | `No_Backup/CDN.1.5.0/levels/egypt1.json` |
 
 Import Quests is an import like the other two: the host opens its picker for zip files only
 (`UTTypeZIP`). Import Quests follows Android's `importZipToDir`: for each top-level name in the zip it
@@ -368,7 +368,7 @@ pointer `0x256a010`: server epoch +0x48, synchronization frame +0x50, device-tim
 check synchronization/device-time mode (`0x13ff3f0`); the market scheduler also uses this
 clock. Serving only the tar bytes with an empty Date leaves timed content unavailable.
 
-A successful gzip download atomically replaces `No_Backup/1.4.2.main.tar`; its real
+A successful gzip download atomically replaces `No_Backup/1.5.0.main.tar`; its real
 headers and body hash are kept in `.cdn.plist` beside it. Startup retains that cache unless
 a different bundled archive has a newer modification time. The last bundled hash in the
 sidecar prevents the same old bundle from replacing a downloaded update on every launch.

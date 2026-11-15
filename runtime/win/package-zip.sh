@@ -3,12 +3,12 @@
 # a "portable" file (everything the game writes stays in data\ beside the .exe) and (for
 # x86-64) the compiler's runtime DLLs. No updater: the zip's program has no WinSparkle.
 #
-#   runtime/win/package-zip.sh --arch all --apk "PvZ2 Reflourished 1.4.2.apk"
+#   runtime/win/package-zip.sh --arch all --apk "PvZ2 Reflourished 1.5.0.apk"
 #
 # Options:
 #   --arch arm64|x64|all   which zips (default all)
 #   --apk FILE             the game's APK, put in Game/ (required)
-#   --tar FILE             the CDN archive, put in Game/1.4.2.main.tar (optional)
+#   --tar FILE             the CDN archive, put in Game/1.5.0.main.tar (optional)
 #   --angle DIR            libEGL.dll and libGLESv2.dll (and d3dcompiler_47.dll)
 #                          to ship; arm64 defaults to prebuilt/win-arm64, x64 to
 #                          prebuilt/win-x64 (runtime/win/build-angle.cmd makes them)
@@ -60,7 +60,7 @@ if [ -z "$ANGLE_GIVEN" ]; then "$H/fetch-angle.sh" "$ARCH" || exit 1; fi
 [ -n "$APK" ] || { echo "package-zip: --apk is required" >&2; exit 2; }
 [ -f "$APK" ] || { echo "package-zip: no APK at $APK" >&2; exit 2; }
 
-GAME_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO/data/game-1.4.2.json")"
+GAME_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$REPO/data/game-1.5.0.json")"
 # The same pattern as the Apple files: PvZ2-Reflourished-<game>-Darwin-<version>-<platform>.
 stamp="PvZ2-Reflourished-$GAME_VERSION-Darwin-$VERSION"
 work="$REPO/out/zip-work"
@@ -81,7 +81,7 @@ stage_common() {
     [ -f "$REPO/runtime/tools/fonts/level-ui.ttf" ] && cp "$REPO/runtime/tools/fonts/level-ui.ttf" "$dir/"
     if [ -n "$TAR" ]; then
         [ -f "$TAR" ] || { echo "package-zip: no CDN archive at $TAR" >&2; exit 2; }
-        cp "$TAR" "$dir/Game/1.4.2.main.tar"
+        cp "$TAR" "$dir/Game/1.5.0.main.tar"
     fi
     cat > "$dir/README.txt" <<'EOF'
 PvZ2: Reflourished for Windows (portable)

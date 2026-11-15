@@ -5,7 +5,7 @@
 #
 #   tools/regress/build-ios-app.sh [out-dir]
 #
-# VERSION sets the app version; data/game-1.4.2.json sets the game version.
+# VERSION sets the app version; data/game-1.5.0.json sets the game version.
 # APP_BUILD overrides the build number (default: major*10000 + minor*100 + patch).
 # BUNDLE_ID overrides the public ID for a development provisioning profile.
 #
@@ -184,7 +184,7 @@ fi
 # invalidates the signature and the bundle has to be sealed exactly once.
 if [ -n "${GAME_APK:-}" ]; then
     [ -f "$GAME_APK" ] || { echo "no game apk at $GAME_APK" >&2; exit 1; }
-    GAME_OBB="${GAME_OBB:-/tmp/1.4.2.main.tar}"
+    GAME_OBB="${GAME_OBB:-/tmp/1.5.0.main.tar}"
     mkdir -p "$APP/Game"
     cp "$GAME_APK" "$APP/Game/pvz2.apk"
     if [ "$GAME_OBB" = none ]; then
@@ -221,7 +221,7 @@ fi
 if [ -n "${GAME_CDN_TAR:-}" ]; then
     [ -f "$GAME_CDN_TAR" ] || { echo "no cdn tar at $GAME_CDN_TAR" >&2; exit 1; }
     mkdir -p "$APP/Game"
-    cp "$GAME_CDN_TAR" "$APP/Game/1.4.2.main.tar"
+    cp "$GAME_CDN_TAR" "$APP/Game/1.5.0.main.tar"
     echo "==> bundled the CDN archive: $(du -h "$GAME_CDN_TAR" | cut -f1)"
 fi
 if [ -n "${ICON_PNG:-}" ]; then

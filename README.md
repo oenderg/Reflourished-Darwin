@@ -15,7 +15,7 @@ mod's own content built in.
 <p align="center">
   <a href="https://github.com/oenderg/Reflourished-Darwin/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/oenderg/Reflourished-Darwin?label=latest&color=8a3ffc"></a>
   <a href="https://github.com/oenderg/Reflourished-Darwin/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/oenderg/Reflourished-Darwin/total?color=e0702c"></a>
-  <a href="https://reflourished.fandom.com/wiki/Changelogs/Version_1.4.x"><img alt="Game version" src="https://img.shields.io/badge/PvZ2%20Reflourished-1.4.2-2ea44f"></a>
+  <a href="https://reflourished.fandom.com/wiki/Changelogs/Version_1.5.x"><img alt="Game version" src="https://img.shields.io/badge/PvZ2%20Reflourished-1.5.0-2ea44f"></a>
   <a href="https://github.com/oenderg/Reflourished-Darwin/releases/latest"><img alt="iPhone and iPad" src="https://img.shields.io/badge/iOS%20%26%20iPadOS-15.5%2B-0a84ff?logo=apple&logoColor=white"></a>
   <a href="https://github.com/oenderg/Reflourished-Darwin/releases/latest"><img alt="Mac" src="https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-0a84ff?logo=apple&logoColor=white"></a>
   <a href="https://github.com/oenderg/Reflourished-Darwin/releases/latest"><img alt="Windows" src="https://img.shields.io/badge/Windows-10%20%26%2011%20·%20x64%20%26%20ARM64-0078d4?logo=windows&logoColor=white"></a>
@@ -208,7 +208,7 @@ with No selected.
 
 ## Build it yourself
 
-You need the **PvZ2 Reflourished 1.4.2** APK from the mod's official download (the MEGA or
+You need the **PvZ2 Reflourished 1.5.0** APK from the mod's official download (the MEGA or
 Google Drive folder). You don't need the OBB that is next to it there: the build downloads
 the same file from a copy on GitHub by itself and checks it. To use your own copy instead,
 pass it with `--obb` (or the workflow's OBB link).
@@ -228,7 +228,7 @@ Needs Xcode (with its iOS platform) and about 8 GB of free space.
 ```sh
 git clone https://github.com/oenderg/Reflourished-Darwin
 cd Reflourished-Darwin
-./build.sh --apk "PvZ2 Reflourished 1.4.2.apk" --slim
+./build.sh --apk "PvZ2 Reflourished 1.5.0.apk" --slim
 ```
 
 The results land in `out/`. Add `--ios` or `--mac` to build just one of them; leave out
@@ -245,7 +245,7 @@ The results land in `out/`. Add `--ios` or `--mac` to build just one of them; le
 
 The game's native libraries (`libPVZ2`, the mod's `libRFLib` and their helpers) are
 translated from Android's ELF format into Mach-O dylibs at build time, with the mod's
-290 code hooks written straight into the converted code. A small host - built on
+452 code hooks written straight into the converted code. A small host - built on
 [Husk](https://github.com/leviidev/husk) - provides what Android would have: the
 JNI calls the game makes, its file system, OpenGL ES through ANGLE over Metal, audio,
 touch and keyboard input, and the app's lifecycle.

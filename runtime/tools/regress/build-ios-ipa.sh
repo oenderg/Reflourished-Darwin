@@ -11,7 +11,7 @@
 #   GAME_OBB   the expansion file         (default: the main tar in /tmp; "none" for the slim
 #              app, which downloads it on the first launch from OBB_URLS)
 #   OBB_URLS, OBB_SHA256, OBB_SIZE   where the host downloads the expansion file from
-#   OBB_NAME   its name (default: 1.4.2's, main.675.com.ea.game.pvz2_rfl.obb)
+#   OBB_NAME   its name (default: 1.5.0's, main.675.com.ea.game.pvz2_rfl.obb)
 #   SIGN_*     identity, provisioning profile, keychain: as for build-ios-app.sh
 set -euo pipefail
 
@@ -19,8 +19,8 @@ R="$(cd "$(dirname "$0")/../.." && pwd)"
 W="$(cd "$R/../../.." && pwd)"
 OUT="${1:-$R/build/pvz2-ipa}"
 
-GAME_APK="${GAME_APK:-$W/user/PvZ2 Reflourished 1.4.2.apk}"
-GAME_OBB="${GAME_OBB:-/tmp/1.4.2.main.tar}"
+GAME_APK="${GAME_APK:-$W/user/PvZ2 Reflourished 1.5.0.apk}"
+GAME_OBB="${GAME_OBB:-/tmp/1.5.0.main.tar}"
 export GAME_APK GAME_OBB
 
 if [ -z "${ICON_PNG:-}" ]; then

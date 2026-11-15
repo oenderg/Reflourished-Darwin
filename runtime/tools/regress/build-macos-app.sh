@@ -10,10 +10,10 @@
 #   GAME_APK       the game's APK
 #   GAME_OBB       the game's expansion file (the assets); leave it out for a slim app
 #   OBB_URLS, OBB_SHA256, OBB_SIZE   where a slim app downloads the expansion file from
-#   OBB_NAME       the expansion file's name (default: 1.4.2's, main.675.com.ea.game.pvz2_rfl.obb)
+#   OBB_NAME       the expansion file's name (default: 1.5.0's, main.675.com.ea.game.pvz2_rfl.obb)
 #   APP_BUILD      override the build number (default: major*10000 + minor*100 + patch)
-# The app version comes from VERSION; the game version comes from data/game-1.4.2.json.
-#   GAME_CDN_TAR   the mod's CDN archive (1.4.2.main.tar)
+# The app version comes from VERSION; the game version comes from data/game-1.5.0.json.
+#   GAME_CDN_TAR   the mod's CDN archive (1.5.0.main.tar)
 #   ANGLE_EGL      ANGLE's libEGL.dylib   (default: the copy inside Steam's CEF)
 #   ANGLE_GLES     ANGLE's libGLESv2.dylib
 #   SPARKLE_DIR    where Sparkle.framework is (scripts/fetch-sparkle.sh)
@@ -30,7 +30,7 @@
 #   Contents/Resources/AppIcon.icns      the app's icon (Reflourished's, from the APK)
 #   Contents/Game/pvz2.apk               the game's APK
 #   Contents/Game/obb/*.obb              the game's expansion file
-#   Contents/Game/1.4.2.main.tar         the mod's CDN archive
+#   Contents/Game/1.5.0.main.tar         the mod's CDN archive
 #
 # The writable state is not in the bundle: it is in ~/Library/Application Support/PvZ2
 # Reflourished, and the host finds the bundle's pieces relative to its own executable.
@@ -156,7 +156,7 @@ if [ -n "${GAME_OBB:-}" ]; then
 fi
 if [ -n "${GAME_CDN_TAR:-}" ]; then
     [ -f "$GAME_CDN_TAR" ] || { echo "no cdn tar at $GAME_CDN_TAR" >&2; exit 1; }
-    cp "$GAME_CDN_TAR" "$APP/Contents/Game/1.4.2.main.tar"
+    cp "$GAME_CDN_TAR" "$APP/Contents/Game/1.5.0.main.tar"
     echo "==> the CDN archive: $(du -h "$GAME_CDN_TAR" | cut -f1)"
 fi
 

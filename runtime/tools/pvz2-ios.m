@@ -1408,8 +1408,8 @@ static void stage_bundled_game(NSString *docs)
 static void stage_bundled_cdn(NSString *docs)
 {
     if (getenv("TL_PVZ2_MAIN_TAR")) return;
-    NSString *src = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Game/1.4.2.main.tar"];
-    NSString *dst = [docs stringByAppendingPathComponent:@"data/No_Backup/1.4.2.main.tar"];
+    NSString *src = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Game/1.5.0.main.tar"];
+    NSString *dst = [docs stringByAppendingPathComponent:@"data/No_Backup/1.5.0.main.tar"];
     tl_cdn_stage(src.UTF8String, dst.UTF8String);
 }
 

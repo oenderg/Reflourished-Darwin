@@ -14,7 +14,7 @@
  *   Export Save    <- No_Backup/pp.dat
  *   Import Quests  -> No_Backup (a zip of the quest folder)
  *   Export Quests  <- No_Backup/activequests (zipped)
- *   Import Level   -> No_Backup/CDN.1.4.2/levels/egypt1.json
+ *   Import Level   -> No_Backup/CDN.1.5.0/levels/egypt1.json
  * The save loader in libRFLib prefers pp.dat.imported to pp.dat and pp.dat.bak,
  * so the imported profile is the one the next load opens.
  */
@@ -41,7 +41,7 @@ void tl_log_line(const char *fmt, ...);
 const char *tl_data_dir(void);
 int tl_pvz2_level_valid(const char *path, char *err, size_t n);
 
-#define LEVEL_OVERRIDE "No_Backup/CDN.1.4.2/levels/egypt1.json"
+#define LEVEL_OVERRIDE "No_Backup/CDN.1.5.0/levels/egypt1.json"
 
 typedef struct pick_job {
     int kind;

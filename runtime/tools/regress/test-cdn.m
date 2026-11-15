@@ -29,7 +29,7 @@ static void completed(uint64_t token, tl_cdn_response *r)
 int main(void)
 {
     @autoreleasepool {
-        assert(tl_cdn_allowed_url("https://reflourished.ducnguyen.org/cdn/1.4.2.main.tar"));
+        assert(tl_cdn_allowed_url("https://reflourished.ducnguyen.org/cdn/1.5.0.main.tar"));
         const char *rejected[] = {"http://reflourished.ducnguyen.org/", "https://reflourished.ducnguyen.org.evil.test/",
             "https://evil.test/reflourished.ducnguyen.org/", "https://user@reflourished.ducnguyen.org/",
             "https://reflourished.ducnguyen.org:444/", "file:///tmp/main.tar", "not a URL"};
@@ -56,7 +56,7 @@ int main(void)
         [meta writeToFile:sidecar atomically:YES];
         setenv("TL_PVZ2_CDN", "offline", 1);
         finished = dispatch_semaphore_create(0);
-        tl_cdn_fetch("https://reflourished.ducnguyen.org/cdn/1.4.2.main.tar", "GET", NULL, 0, cache.UTF8String, 42, completed);
+        tl_cdn_fetch("https://reflourished.ducnguyen.org/cdn/1.5.0.main.tar", "GET", NULL, 0, cache.UTF8String, 42, completed);
         assert(!dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)));
         assert(answer && answer->status == 200 && answer->length == update.length);
         assert(!memcmp(answer->body, update.bytes, update.length));
@@ -68,7 +68,7 @@ int main(void)
         free(etag); free(date); tl_cdn_response_retain(answer); tl_cdn_response_free(answer); tl_cdn_response_free(answer);
         [@"broken gzip" writeToFile:cache atomically:YES encoding:NSUTF8StringEncoding error:nil];
         answer = NULL;
-        tl_cdn_fetch("https://reflourished.ducnguyen.org/cdn/1.4.2.main.tar", "GET", NULL, 0, cache.UTF8String, 42, completed);
+        tl_cdn_fetch("https://reflourished.ducnguyen.org/cdn/1.5.0.main.tar", "GET", NULL, 0, cache.UTF8String, 42, completed);
         assert(!dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) && !answer);
         [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
         puts("PASS: host allowlist, cache retention, bundle upgrade, fresh offline Date, cached ETag, gzip rejection");
