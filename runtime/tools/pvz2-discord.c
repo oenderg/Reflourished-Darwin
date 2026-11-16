@@ -12,7 +12,8 @@
  * activity). So a quick off/on never reconnects, which Discord answers slowly
  * after a few reconnects in a row. The activity is sent when the setting or the
  * connection changes, never on a timer: Discord counts elapsed time from the
- * start timestamp itself, and allows five updates in twenty seconds. Once the
+ * start timestamp itself, and allows five updates in twenty seconds, so a
+ * change is sent once the setting has held for a second. Once the
  * setting has stayed off for a minute the connection is closed, and while it
  * is off nothing reconnects. The worker reads on every tick, so a Discord that
  * quits or restarts is noticed and reconnected to within a few seconds.
@@ -34,6 +35,7 @@
 #define RETRY_REFUSED_TICKS 50          /* 10 s after Discord turned the connection down */
 #define QUIET_TICKS 150                 /* 30 s between "Discord is not running" notes */
 #define OFF_CLOSE_TICKS 300             /* close the connection 60 s after the setting goes off */
+#define SETTLE_TICKS 5                  /* the setting must hold for 1 s before it is sent */
 #define RATE_SENDS 5                    /* Discord: at most five updates ... */
 #define RATE_TICKS 105                  /* ... in twenty seconds (plus a second of margin) */
 
@@ -59,6 +61,8 @@ typedef struct {
     unsigned off_since;                 /* the tick the setting went off while connected */
     unsigned sent_at[RATE_SENDS];       /* ticks of the last updates, oldest first */
     int quiet;                          /* connect lines are not logged until the next READY */
+    int last_want;                      /* the setting as last seen, and ... */
+    unsigned want_at;                   /* ... the tick it last changed */
 } discord_state;
 
 static discord_state g;
@@ -246,6 +250,10 @@ static void handle_frame(discord_state *s, unsigned opcode, const unsigned char 
 static void pump(discord_state *s)
 {
     int want = atomic_load_explicit(&g_enabled, memory_order_relaxed);
+    if (want != s->last_want) {
+        s->last_want = want;
+        s->want_at = s->ticks;
+    }
 
     if (s->stage == ST_OFFLINE) {
         if (!want || s->ticks < s->retry_at) return;
@@ -302,7 +310,9 @@ static void pump(discord_state *s)
     }
     if (s->stage != ST_READY) return;
 
-    if (want != s->shown && may_send(s)) {
+    /* Only a setting that has held for a second is sent: a burst of toggles
+     * becomes one update and never uses up Discord's five in twenty seconds. */
+    if (want != s->shown && s->ticks - s->want_at >= SETTLE_TICKS && may_send(s)) {
         send_state(s, want);
         if (s->stage == ST_OFFLINE) return;
     }
@@ -343,6 +353,7 @@ void tl_discord_start(unsigned long long start_unix_ms, const char *app_id_overr
     /* Set before the thread exists: with the setting off, not even a connect
      * may slip out before the host's first update reaches the worker. */
     atomic_store_explicit(&g_enabled, enabled != 0, memory_order_relaxed);
+    g.last_want = enabled != 0;
     atomic_store_explicit(&g_stop, false, memory_order_relaxed);
     atomic_store_explicit(&g_stopped, false, memory_order_relaxed);
     if (log) log("discord: rich presence started (application id %s)",
