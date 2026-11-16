@@ -5,6 +5,23 @@ change any of the four libraries; how much work it is depends on which ones chan
 
 ## 1. See what changed
 
+### Scheduled update watcher
+
+`.github/workflows/watch-game.yml` checks every six hours and can be run manually. It reads
+only the small `liblatesttimerelease` and `live/latest.json` feeds linked below, comparing the
+library SHA-256 and the OBB hash, size and full URL with the sole `data/game-*.json` pin.
+It opens one `game-update` issue for changed values not already reported in an open labeled
+issue. Keep the label and hidden identity markers for deduplication. Unreachable or malformed
+feeds are logged and skipped. No game files are downloaded and no pins are changed.
+
+Run `python3 scripts/watch-game.py --dry-run` locally, or add `--pin path/to/copy.json` to test
+another pin without editing the repository. Dry runs never contact GitHub. Normal unchanged
+runs are silent. The workflow grants only `issues: write` and serializes runs to avoid duplicates.
+There is no separate APK/version signal in these feeds: they detect new releases when their
+library or OBB changes, but an APK-only release with identical live data needs a manual check.
+
+### Compare the libraries
+
 ```sh
 unzip -o -q new.apk 'lib/arm64-v8a/*.so' -d new
 shasum -a 256 new/lib/arm64-v8a/*.so
