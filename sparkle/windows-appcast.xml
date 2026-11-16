@@ -7,17 +7,17 @@
     <language>en</language>
     <item>
       <title>PvZ2 Reflourished 1.5.1 for Windows</title>
-      <pubDate>Mon, 16 Nov 2026 08:30:34 +0000</pubDate>
+      <pubDate>Mon, 16 Nov 2026 09:50:20 +0000</pubDate>
       <link>https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.1</link>
       <sparkle:version>10501</sparkle:version>
       <sparkle:shortVersionString>1.5.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>10.0</sparkle:minimumSystemVersion>
       <description><![CDATA[<p><b>Reflourished 1.5.1.</b> A hotfix: the mod's second hotfix (1.5.0-R01), a crash with the seed keys, and Settings &gt; Import/Export on every platform.</p><ul><li>Fixed a crash when you picked a card with a number key and then tapped the lawn in some levels, such as the I, Zombie levels and Holiday Mashup Day 6.</li><li>iPhone, iPad and Mac: Export Save and Import Save in Settings &gt; Import/Export work again.</li><li>Windows: Settings &gt; Import/Export now opens Windows' own Open and Save dialogs, so you can back up and restore your save.</li><li>The mod's 1.5.0-R01 hotfix is included: Pole Vaulter no longer freezes the game when he reaches the brains in I, Zombie, Flameweed's seed packet shows the right price, and War March no longer leaves some plants with a very long recharge.</li></ul><p><a href="https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.1">The release on GitHub</a></p>]]></description>
-      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.1/PvZ2-Reflourished-1.5.0-Darwin-1.5.1-Windows-Setup.exe" length="112083441" type="application/octet-stream"
-                 sparkle:edSignature="yGsGeUL5YFl9D0ajzUirguO9SN0ZnFWgWUKdpYQg4klqziWXmFLTj7g+El9tLH3FnhnVxFjyG3QPW1uD2ddOBw==" sparkle:os="windows-x64"
+      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.1/PvZ2-Reflourished-1.5.0-Darwin-1.5.1-Windows-Setup.exe" length="112089734" type="application/octet-stream"
+                 sparkle:edSignature="UbIkmA1ten45BgMKPNoKHnxUKTld0KPbIol6a/owNAs7qM01w2LD9zF9urZKhSYSGYTT39rqiZ+gJvugW2zZBQ==" sparkle:os="windows-x64"
                  sparkle:installerArguments="/SILENT /SP- /NOICONS"/>
-      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.1/PvZ2-Reflourished-1.5.0-Darwin-1.5.1-Windows-Setup.exe" length="112083441" type="application/octet-stream"
-                 sparkle:edSignature="yGsGeUL5YFl9D0ajzUirguO9SN0ZnFWgWUKdpYQg4klqziWXmFLTj7g+El9tLH3FnhnVxFjyG3QPW1uD2ddOBw==" sparkle:os="windows-arm64"
+      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.1/PvZ2-Reflourished-1.5.0-Darwin-1.5.1-Windows-Setup.exe" length="112089734" type="application/octet-stream"
+                 sparkle:edSignature="UbIkmA1ten45BgMKPNoKHnxUKTld0KPbIol6a/owNAs7qM01w2LD9zF9urZKhSYSGYTT39rqiZ+gJvugW2zZBQ==" sparkle:os="windows-arm64"
                  sparkle:installerArguments="/SILENT /SP- /NOICONS"/>
     </item>
   </channel>
