@@ -4052,6 +4052,11 @@ static atomic_ullong g_told_size;
  * write, so a block the guest has freed is never written to. */
 static atomic_ullong g_app_packed;
 
+/* The last address the check before a write turned down. The search skips
+ * it: if it is found again, the next write is turned down again, and the
+ * search runs again, for as long as the game runs. */
+static atomic_ullong g_app_rejected;
+
 /* Whether the search for the app object is going on. It can be asked for
  * again: the guest can free the object, and then it has to be found once
  * more. */
@@ -4135,6 +4140,7 @@ static uint64_t guest_app_find(int start_w, int start_h, bool writable_only)
                     if (i < 0x744) continue;
                     /* The address of the object itself, not of the copy. */
                     uint64_t app = (uint64_t)(uintptr_t)(p + i - 0x744);
+                    if (app == atomic_load(&g_app_rejected)) continue;
                     uint64_t packed = 0;
                     if (!guest_read(app + 0x86c, &packed, sizeof packed)) continue;
                     if ((int)(uint32_t)packed != start_w ||
@@ -4253,11 +4259,18 @@ static uint64_t guest_app_find(int start_w, int start_h, bool writable_only)
                     got >= 8) {
                     for (SIZE_T i = 0; i + 8 <= got; i += 4) {
                         if (i < 0x744) continue;
+                        /* The size the object holds must be the one looked
+                         * for, as on the Mac: the finder remembers that size as
+                         * what the object holds, and the check before every
+                         * write compares the two. An object with some other
+                         * pair can pass the type test too, and then every write
+                         * is refused and the search finds it again, once a
+                         * second, for as long as the game runs. */
                         int32_t pair[2];
                         memcpy(pair, buf + i, sizeof pair);
-                        if (pair[0] <= 0 || pair[1] <= 0 ||
-                            pair[0] > 100000 || pair[1] > 100000) continue;
+                        if (pair[0] != start_w || pair[1] != start_h) continue;
                         uint64_t candidate = (uint64_t)(uintptr_t)(base + off + i - 0x744);
+                        if (candidate == atomic_load(&g_app_rejected)) continue;
                         uint64_t packed = ((uint64_t)(uint32_t)pair[0]) |
                                           ((uint64_t)(uint32_t)pair[1] << 32);
                         if (!guest_app_looks_right(candidate, packed)) continue;
@@ -5490,6 +5503,7 @@ static bool guest_tell_screen_size(int w, int h)
          * knows what to look for. */
         tl_log_line("pvz2: the guest's app object at %p is not the object any more -- nothing is written",
                     (void *)app);
+        atomic_store(&g_app_rejected, (unsigned long long)app);
         atomic_store(&g_app_object, 0);
         start_app_finder();
         return false;
