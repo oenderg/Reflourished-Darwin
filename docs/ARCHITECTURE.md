@@ -117,6 +117,16 @@ answers the few calls into those parts). The pieces that matter here:
   tile or selection changes and periodically while still. Only the cross is hidden on an invalid
   plant tile; the picture remains. While a new tile's answer is pending, the last confirmed band
   stays in place for at most 100 ms. The overlay does not send input.
+- `pvz2-discord.c` / `.h`: Discord Rich Presence for the Mac and Windows apps (iOS sends nothing).
+  Discord's local RPC over IPC, on its own thread: the app's name, icon, play time and one button to
+  the website. The application id, name, icon address and link are constants in `pvz2-discord.h`
+  (`--discord-app-id=<id>` or `TL_DISCORD_APP_ID` override the id for a test). Only the transport is
+  per platform: `pvz2-discord-macos.c` (a Unix socket in `$TMPDIR`) and `pvz2-discord-windows.c`
+  (the `\\?\pipe\discord-ipc-N` pipe). The connection stays open while the game runs; the
+  setting (General in both Settings windows, on by default) only decides whether Discord shows the
+  activity. A change is sent once the setting has held for a second, within Discord's five updates
+  in twenty seconds; after a minute off the connection closes. A Discord that quits or restarts is
+  reconnected every 2 s; one that refuses the connection (signed out) is retried every 10 s.
 - `pvz2-ios.m`: the iPhone/iPad app. UIKit scene, touch, hardware-keyboard shortcuts, the OBB
   download, files under `Documents/` (visible in the Files app).
 - `regress/build-macos-app.sh`, `regress/build-ios-app.sh`, `regress/build-ios-ipa.sh`: compile the
