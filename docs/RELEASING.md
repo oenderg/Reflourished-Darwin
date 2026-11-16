@@ -16,7 +16,8 @@ Actions > **Build** > Run workflow, with:
 | `obb_url` | optional; empty = the mod's own OBB (only needed for full builds) |
 | `platforms` | All (default: iPhone/iPad, Mac and Windows), iPhone/iPad and Mac, one of those, or Windows |
 | `variants` | Slim and full (default), Slim, or Full |
-| `publish` | on (default): publish the release, the AltStore source and the update feeds; off: build only |
+| `publish` | off (default): build only; on: publish the release, the AltStore source and the update feeds. From `main` only (below) |
+| `replace_release` | off (default); on, with `publish`: replace the files of a release that is out already (a rebuild of one platform, say). Off, a published tag stops the run |
 | `release_tag` | optional; empty = `v<VERSION>` (for example `v1.0.0`) |
 | `skip_smoke` | off (default); on: no Windows smoke test, so publishing does not wait for it. Only after checking a failed smoke test yourself (below) |
 
@@ -72,10 +73,24 @@ out already (one platform rebuilt, say) adds or replaces its files and rewrites 
 
 For example: `PvZ2-Reflourished-1.4.2-Darwin-1.0.0-iOS.ipa`. Slim is a small download; the app
 downloads the game's data on first launch. Full has the data inside, for an offline first launch.
-Selecting one platform or variant publishes just those files.
+Selecting one platform or variant publishes just those files. Into a release that is out already,
+that needs `replace_release` on.
+
+**What a publishing run refuses** (`scripts/check-publish.sh`, in the first job, so the run stops in
+seconds, and again just before the upload, in case another run published the tag meanwhile):
+
+- a run on any branch but `main`: a test build of a branch is a run with `publish` off;
+- a tag whose release is published already, unless `replace_release` is on (a new release is a
+  `VERSION` bump);
+- a tag that exists without a release on another commit (a version that was not bumped, or a
+  deleted release: look before deleting the tag);
+- `build-inputs`, the draft that holds the build's inputs.
+
+The upload step itself also stops on a published release without `replace_release`.
 
 A run with **Publish** off creates no release, AltStore entry or feed item: it keeps the same files
-as artifacts of the run for 14 days (a publishing run keeps them for a day), unzipped, so anyone signed in to GitHub can download a test
+as artifacts of the run for 14 days (a publishing run keeps them for 7, so a release whose files
+were replaced by mistake can be put back from them), unzipped, so anyone signed in to GitHub can download a test
 build from the run's page (for example for the reporter of an issue to check a fix).
 
 `build.sh` keeps its plain local names in `out/`. After each build,

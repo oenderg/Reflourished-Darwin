@@ -22,9 +22,13 @@ on:
         options: [Slim and full, Slim, Full]
         default: Slim and full
       publish:
-        description: "Publish the release, the AltStore source and the update feeds (off: build only)"
+        description: "Publish the release, the AltStore source and the update feeds (off: build only). From main only"
         type: boolean
-        default: true
+        default: false
+      replace_release:
+        description: "With publish: replace the files of a release that is out already (a rebuild). Off: a published tag stops the run"
+        type: boolean
+        default: false
       release_tag:
         description: "Release tag (leave empty: v<VERSION>)"
         required: false
@@ -47,6 +51,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: scripts/check-repo.sh
+      # A publishing run that would publish the wrong thing stops here, before an hour of building.
+      - name: What this run would publish
+        if: github.event.inputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          REPLACE_RELEASE: ${{ github.event.inputs.replace_release }}
+        run: scripts/check-publish.sh "$RELEASE_TAG" "$REPLACE_RELEASE"
 
   build:
     name: iPhone, iPad and Mac
@@ -184,7 +196,7 @@ jobs:
         with:
           path: release/${{ steps.metadata.outputs.prefix }}-iOS.ipa
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: ignore
 
       - name: Keep the iOS full download
@@ -192,7 +204,7 @@ jobs:
         with:
           path: release/${{ steps.metadata.outputs.prefix }}-iOS-Full.ipa
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: ignore
 
       - name: Keep the Mac download
@@ -200,7 +212,7 @@ jobs:
         with:
           path: release/${{ steps.metadata.outputs.prefix }}-Mac.dmg
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: ignore
 
       - name: Keep the Mac full download
@@ -208,7 +220,7 @@ jobs:
         with:
           path: release/${{ steps.metadata.outputs.prefix }}-Mac-Full.dmg
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: ignore
 
   # Windows: the ARM64 programs cross-build on a Mac with llvm-mingw, the way they are built
@@ -385,7 +397,7 @@ jobs:
         with:
           path: out/win-release/${{ steps.metadata.outputs.prefix }}-Windows-Setup.exe
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: error
 
       - name: Keep the x64 zip
@@ -393,7 +405,7 @@ jobs:
         with:
           path: out/win-release/${{ steps.metadata.outputs.prefix }}-Windows-x64.zip
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: error
 
       - name: Keep the ARM64 zip
@@ -401,7 +413,7 @@ jobs:
         with:
           path: out/win-release/${{ steps.metadata.outputs.prefix }}-Windows-ARM64.zip
           archive: false
-          retention-days: ${{ github.event.inputs.publish == 'true' && 1 || 14 }}
+          retention-days: ${{ github.event.inputs.publish == 'true' && 7 || 14 }}
           if-no-files-found: error
 
   # Each portable zip started twice on a runner of its own CPU, as a new player would
@@ -521,6 +533,14 @@ jobs:
           echo "tag=${RELEASE_TAG:-v$APP_VERSION}" >> "$GITHUB_OUTPUT"
           echo "prefix=PvZ2-Reflourished-$GAME_VERSION-Darwin-$APP_VERSION" >> "$GITHUB_OUTPUT"
 
+      # Again, just before anything is uploaded: another run may have published the tag meanwhile.
+      - name: What this run would publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          REPLACE_RELEASE: ${{ github.event.inputs.replace_release }}
+        run: scripts/check-publish.sh "$RELEASE_TAG" "$REPLACE_RELEASE"
+
       # The files are single-file run files (archive: false). download-artifact unpacks a .zip
       # one, so the Windows zips would arrive as their contents; the API hands each back as it is.
       - name: Download the release files
@@ -546,6 +566,7 @@ jobs:
           GAME: ${{ steps.metadata.outputs.game }}
           TAG: ${{ steps.metadata.outputs.tag }}
           PREFIX: ${{ steps.metadata.outputs.prefix }}
+          REPLACE_RELEASE: ${{ github.event.inputs.replace_release }}
         run: |
           set -euo pipefail
           # The release page lists the files in the order they were uploaded: one at a time, this order.
@@ -557,7 +578,12 @@ jobs:
           python3 scripts/release-notes.py release --version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" > release-notes.md
           cat release-notes.md
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            # A run that adds files to a release that is out already (another platform, a rebuild).
+            # A run that adds files to a release that is out already (another platform, a rebuild):
+            # only with replace_release (scripts/check-publish.sh checked it twice; this is the last word).
+            if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = false ] &&
+               [ "$REPLACE_RELEASE" != true ]; then
+              echo "$TAG is published and replace_release is off: nothing is uploaded" >&2; exit 1
+            fi
             for f in "${files[@]}"; do gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY" --clobber; done
             gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/assets.json"
             python3 scripts/release-notes.py --assets "$RUNNER_TEMP/assets.json" --version "$VERSION" \
