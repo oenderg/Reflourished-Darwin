@@ -36,6 +36,8 @@ private enum Key {
     static let closeAction = "closeAction"
     static let confirmQuit = "confirmQuit"
     static let renderSharp = "renderSharp"
+    /// Discord Rich Presence, on by default: a missing preference is on.
+    static let discordPresence = "discordPresence"
     /// The in-level key badges, on by default.
     static let showLevelKeys = "showLevelKeys"
     static let plantOnPress = "plantOnPress"
@@ -282,6 +284,7 @@ private struct GeneralPane: View {
     @AppStorage(Key.closeAction) private var closeAction = "quit"
     @AppStorage(Key.confirmQuit) private var confirmQuit = true
     @AppStorage(Key.renderSharp) private var renderSharp = false
+    @AppStorage(Key.discordPresence) private var discordPresence = true
 
     /// "Letterbox" is the old name of the fixed mode.
     private var mode: Binding<String> {
@@ -362,6 +365,20 @@ private struct GeneralPane: View {
                 }
             } footer: {
                 Text("The game draws at the sharpness of the display its window is on, and follows the window to another display. “Sharper on standard displays” draws at twice the size on a display that isn't Retina and scales it down: smoother edges, more work for the graphics card. With the game's “Target 60 FPS” on, the game runs at the refresh rate of the display its window is on (120 Hz, 175 Hz…); off, at 60.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                ResettableRow(title: "Show my activity on Discord", isDefault: discordPresence,
+                              reset: { discordPresence = true }) {
+                    Toggle("", isOn: $discordPresence)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+            } header: {
+                Text("Discord")
+            } footer: {
+                Text("While the game runs, Discord shows it as your activity with the time since it started and a link to the game's site. Turning this off clears the activity and closes the connection at once; it is on by default. The Mac and Windows apps only: iPhone and iPad send nothing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

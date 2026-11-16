@@ -53,6 +53,7 @@
 #include "pvz2-file-picker.h"
 #include "pvz2-badge-style.h"
 #include "pvz2-cursor-art.h"
+#include "pvz2-discord.h"
 
 static bool open_game_url(const char *url)
 {
@@ -144,6 +145,14 @@ static NSString *const kConfirmQuit = @"confirmQuit";
 static bool confirm_quit(void)
 {
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:kConfirmQuit];
+    return v ? [v boolValue] : true;
+}
+/* Discord Rich Presence is on by default: a missing preference is on, and the
+ * settings window writes the same key when the player toggles it. */
+static NSString *const kDiscordPresence = @"discordPresence";
+static bool discord_presence_enabled(void)
+{
+    id v = [[NSUserDefaults standardUserDefaults] objectForKey:kDiscordPresence];
     return v ? [v boolValue] : true;
 }
 /* The scale the game draws at: the display's own -- or, with "Sharper on
@@ -3218,6 +3227,7 @@ static void start_updater(void)
                                                       usingBlock:^(NSNotification *note) {
             (void)note;
             tl_pvz2_set_plant_on_press([[NSUserDefaults standardUserDefaults] boolForKey:@"plantOnPress"]);
+            tl_discord_set_enabled(discord_presence_enabled() ? 1 : 0);
             [g_view followDisplayScale];
             [g_view badgesSettingChanged];
             [g_view cursorSettingChanged];
@@ -3500,6 +3510,22 @@ static void start_updater(void)
     tl_log_line("macos: egl [%s] gles [%s]", config.angle_egl ? config.angle_egl : "(null)",
                 config.angle_gles ? config.angle_gles : "(null)");
 
+    /* Discord Rich Presence runs on its own thread, off the game's GL thread.
+     * The name, icon asset and button live in pvz2-discord.h; the id is empty
+     * until the user creates the application. A launch override lets a test
+     * use its own id without touching the shipped one. */
+    {
+        NSString *override = nil;
+        const char *env = getenv("TL_DISCORD_APP_ID");
+        if (env && *env) override = @(env);
+        for (NSString *arg in NSProcessInfo.processInfo.arguments)
+            if ([arg hasPrefix:@"--discord-app-id="])
+                override = [arg substringFromIndex:@"--discord-app-id=".length];
+        struct timeval tv; gettimeofday(&tv, NULL);
+        unsigned long long ms = (unsigned long long)tv.tv_sec * 1000 + (unsigned)tv.tv_usec / 1000;
+        tl_discord_start(ms, override.UTF8String, discord_presence_enabled() ? 1 : 0, tl_log_line);
+    }
+
     pthread_attr_t attr; pthread_attr_init(&attr); pthread_attr_setstacksize(&attr, 8u << 20);
     pthread_t thread;
     int error = pthread_create(&thread, &attr, launch_game, NULL);
@@ -3650,6 +3676,9 @@ static void start_updater(void)
 - (void)applicationWillTerminate:(NSNotification *)notification
 {
     (void)notification;
+    /* Clear the activity before the process leaves. The call is bounded, so a
+     * Discord that stopped answering cannot hold up the quit. */
+    tl_discord_stop();
     /* The guest is an Android game: it expects to be told that the app is going
      * away, and it saves on that event. The call waits for the guest, so the
      * save is on the disk before the process leaves.
