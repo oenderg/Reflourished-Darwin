@@ -11,16 +11,16 @@
 #ifndef PVZ2_DISCORD_H
 #define PVZ2_DISCORD_H
 
-/* The one place the Discord application id lives. The user creates the
- * application in Discord's developer portal and puts its id here. It is empty
- * until then: the worker still does the handshake so a test can see Discord's
- * error reply. TL_DISCORD_APP_ID or --discord-app-id=<id> overrides it at
- * launch, which keeps a test away from the shipped value. */
-#define TL_DISCORD_APPLICATION_ID ""
+/* The one place the Discord application id lives (the "PvZ2: Reflourished"
+ * application in Discord's developer portal). TL_DISCORD_APP_ID or
+ * --discord-app-id=<id> overrides it at launch for a test. */
+#define TL_DISCORD_APPLICATION_ID "1571926819857244202"
 #define TL_DISCORD_APP_NAME "PvZ2: Reflourished"
 #define TL_DISCORD_BUTTON_LABEL TL_DISCORD_APP_NAME
 #define TL_DISCORD_BUTTON_URL "https://pvz.oender.dev"
-#define TL_DISCORD_LARGE_IMAGE "icon"
+/* The app icon by its web address (the website's copy, which follows the
+ * repo's icon), so no art has to be uploaded to the Discord application. */
+#define TL_DISCORD_LARGE_IMAGE "https://pvz.oender.dev/icons/reflourished.png"
 
 typedef void (*tl_discord_log_fn)(const char *fmt, ...);
 
