@@ -20,6 +20,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.2",
+          "buildVersion": "10502",
+          "date": "2026-11-16",
+          "localizedDescription": "Reflourished 1.5.2. A Windows hotfix.\n\n• Windows: fixed a bug where, on some starts, the game kept using extra CPU in the background for as long as it ran. It could happen on any PC, more often on Intel and AMD ones.",
+          "downloadURL": "https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.2/PvZ2-Reflourished-1.5.0-Darwin-1.5.2-iOS.ipa",
+          "size": 54997926,
+          "minOSVersion": "15.5"
+        },
+        {
           "version": "1.5.1",
           "buildVersion": "10501",
           "date": "2026-11-16",
