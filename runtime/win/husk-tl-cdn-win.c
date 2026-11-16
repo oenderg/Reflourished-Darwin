@@ -4,10 +4,12 @@
  *
  * A fetch goes to the project's own CDN over WinHTTP, with the same rules as
  * the Mac client: https to reflourished.ducnguyen.org only, no redirects, 30 s
- * without data and 60 s in total, the server's Date required, and the body must
- * be a complete gzip archive before it replaces the last usable local copy.
- * When the network fails the saved copy answers, dated now, which is what the
- * Mac client does.
+ * without data and 60 s in total, the server's Date required. Every allowed URL
+ * is fetched (the content archive, the title screen's news list and its
+ * pictures). Only the content archive, /cdn/1.5.0.main.tar, has a local copy:
+ * its body must be a complete gzip archive before it replaces that copy, and
+ * when the network fails the saved copy answers, dated now. Any other request
+ * that fails is a plain failure. This is what the Mac client does.
  */
 #include "husk-tl-cdn.h"
 
@@ -229,7 +231,7 @@ static tl_cdn_response *http_fetch(const char *url, const char *cache, char *why
         if (!got) break;
         len += got;
     }
-    if (!valid_archive(body, len)) { snprintf(why, whyn, "invalid gzip archive"); free(body); goto done; }
+    if (cache && !valid_archive(body, len)) { snprintf(why, whyn, "invalid gzip archive"); free(body); goto done; }
 
     /* Replace the cache atomically: a sibling temporary, then a rename. */
     if (cache) {
@@ -269,14 +271,18 @@ static DWORD WINAPI run(void *p)
     job *j = p;
     tl_cdn_response *r = NULL;
     char why[160] = "";
-    static const char *const suffix = "/cdn/1.5.0.main.tar";
-    size_t url_len = strlen(j->url), suffix_len = strlen(suffix);
-    bool wanted = url_len >= suffix_len && !strcmp(j->url + url_len - suffix_len, suffix);
-    if (tl_cdn_allowed_url(j->url) && wanted)
-        r = http_fetch(j->url, j->cache, why, sizeof(why));
+    /* The content archive alone has a local copy, as on the Mac: the path must
+     * be exactly /cdn/1.5.0.main.tar. Everything else is fetched and passed on. */
+    const char *path = strchr(j->url + (strncmp(j->url, "https://", 8) ? 0 : 8), '/');
+    size_t path_len = path ? strcspn(path, "?#") : 0;
+    bool archive = path && path_len == strlen("/cdn/1.5.0.main.tar") &&
+                   !strncmp(path, "/cdn/1.5.0.main.tar", path_len);
+    const char *cache = archive ? j->cache : NULL;
+    if (tl_cdn_allowed_url(j->url))
+        r = http_fetch(j->url, cache, why, sizeof(why));
     else
         snprintf(why, sizeof(why), "URL not allowed");
-    if (!r) r = local_answer(j->cache, why);
+    if (!r) r = local_answer(cache, why);
     j->done(j->token, r);
     free(j->url); free(j->cache); free(j);
     return 0;
