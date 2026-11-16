@@ -68,7 +68,11 @@ started again; a failure you have checked and want to publish anyway is a new ru
 **Publishing** is one job, `publish`, at the end. Every build job only keeps its files as run files;
 `publish` starts once every build the run asked for has passed (a failed or cancelled build publishes
 nothing). It fetches the files, makes the release as a draft with all of them, then makes it public,
-then commits the AltStore source and both update feeds and pushes them. A run for a release that is
+then commits the AltStore source and both update feeds and pushes them, and last tells the website
+(pvz.oender.dev) to rebuild (`scripts/notify-site.sh`, with the `SITE_DISPATCH_TOKEN` secret: a fine-grained token
+for `oenderg/pvz-ports-site` only, Contents read and write). The `site` workflow does the same for a change to the
+icon or the AltStore source pushed by hand, and for a release published from the releases page; without the
+message the site catches up at its daily rebuild. A run for a release that is
 out already (one platform rebuilt, say) adds or replaces its files and rewrites the release text
 (`release-notes.py --assets`).
 
