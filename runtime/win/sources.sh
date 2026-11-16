@@ -8,4 +8,5 @@ WIN_CORE="$H/tl-win-compat.c $H/husk-tl-aot-win.c
 WIN_GAME="$N/husk-tl-pvz2.c $N/husk-tl-pvz2-picker.c $N/husk-tl-opensles.c
   $H/husk-tl-audio-win.c $H/husk-tl-cdn-win.c $H/husk-obb-win.c $H/husk-tl-pvz2-level-win.c $T/husk-tl-sound.c
   $H/../tools/pvz2-windows.c $H/../tools/pvz2-windows-settings.c $H/../tools/pvz2-windows-updates.c
-  $H/../tools/pvz2-cursor-images.c $H/../tools/vendor/zstd/zstddeclib.c"
+  $H/../tools/pvz2-cursor-images.c $H/../tools/vendor/zstd/zstddeclib.c
+  $H/../tools/pvz2-discord.c $H/../tools/pvz2-discord-windows.c"
