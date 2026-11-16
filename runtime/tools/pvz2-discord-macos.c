@@ -36,6 +36,10 @@ int tl_discord_transport_open(tl_discord_conn *conn)
         snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
         int fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (fd < 0) return -1;
+        /* A write to a socket Discord has closed must fail with EPIPE, not
+         * raise SIGPIPE, which would end the game. */
+        int one = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
         if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
             conn->handle = (void *)(intptr_t)fd;
             conn->index = i;

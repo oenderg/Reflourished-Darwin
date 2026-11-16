@@ -7,9 +7,15 @@
  * replies, CLOSE 2. SET_ACTIVITY carries the activity; Discord echoes it back
  * in its reply, which is the proof a test reads in the log.
  *
- * The activity is sent once per connection. Discord counts elapsed time from
- * the start timestamp, and the client may only update its status five times in
- * twenty seconds, so there is nothing to gain by sending it on every tick.
+ * The connection stays open while the game runs. The setting only decides
+ * what Discord shows: the activity, or nothing (SET_ACTIVITY with a null
+ * activity). So a quick off/on never reconnects, which Discord answers slowly
+ * after a few reconnects in a row. The activity is sent when the setting or the
+ * connection changes, never on a timer: Discord counts elapsed time from the
+ * start timestamp itself, and allows five updates in twenty seconds. Once the
+ * setting has stayed off for a minute the connection is closed, and while it
+ * is off nothing reconnects. The worker reads on every tick, so a Discord that
+ * quits or restarts is noticed and reconnected to within a few seconds.
  * Stage changes happen only on the worker thread; the setting and the stop
  * request are atomics the host writes.
  */
@@ -25,13 +31,16 @@
 
 #define TICK_MS 200
 #define RETRY_TICKS 10                  /* 2 s between connects */
+#define RETRY_REFUSED_TICKS 50          /* 10 s after Discord turned the connection down */
 #define QUIET_TICKS 150                 /* 30 s between "Discord is not running" notes */
+#define OFF_CLOSE_TICKS 300             /* close the connection 60 s after the setting goes off */
+#define RATE_SENDS 5                    /* Discord: at most five updates ... */
+#define RATE_TICKS 105                  /* ... in twenty seconds (plus a second of margin) */
 
 typedef enum {
     ST_OFFLINE,
     ST_HANDSHAKE,
-    ST_ACTIVITY,
-    ST_LIVE
+    ST_READY
 } discord_stage;
 
 typedef struct {
@@ -46,6 +55,10 @@ typedef struct {
     int pid;
     tl_discord_log_fn log;
     unsigned ticks, retry_at, note_at;
+    int shown;                          /* what Discord holds now: 1 the activity, 0 nothing */
+    unsigned off_since;                 /* the tick the setting went off while connected */
+    unsigned sent_at[RATE_SENDS];       /* ticks of the last updates, oldest first */
+    int quiet;                          /* connect lines are not logged until the next READY */
 } discord_state;
 
 static discord_state g;
@@ -142,11 +155,12 @@ static void log_reply(discord_state *s, const char *what, const char *json, int 
     s->log("discord: %s: %s", what, buf);
 }
 
-static void disconnect(discord_state *s, int clear)
+static void disconnect(discord_state *s, int polite, unsigned retry_ticks)
 {
     if (s->conn.handle) {
-        if (clear) {
-            send_frame(s, 1, s->clear, (int)strlen(s->clear));
+        if (polite) {
+            if (s->stage == ST_READY && s->shown)
+                send_frame(s, 1, s->clear, (int)strlen(s->clear));
             send_frame(s, 2, "", 0);
             s->log("discord: the activity is cleared and the connection is closed");
         }
@@ -154,8 +168,35 @@ static void disconnect(discord_state *s, int clear)
         s->conn.handle = NULL;
     }
     s->rx_len = 0;
+    s->shown = 0;
     s->stage = ST_OFFLINE;
-    s->retry_at = s->ticks + RETRY_TICKS;
+    s->retry_at = s->ticks + retry_ticks;
+}
+
+/* Discord allows five updates in twenty seconds. Toggles faster than that are
+ * not queued: the worker compares what the setting wants with what Discord
+ * shows, so once a slot frees up only the latest state goes out. */
+static int may_send(const discord_state *s)
+{
+    return s->sent_at[0] == 0 || s->ticks - s->sent_at[0] >= RATE_TICKS;
+}
+
+static void send_state(discord_state *s, int want)
+{
+    const char *json = want ? s->activity : s->clear;
+    if (send_frame(s, 1, json, (int)strlen(json)) != 0) {
+        s->log("discord: the update could not be written");
+        disconnect(s, 0, RETRY_TICKS);
+        return;
+    }
+    memmove(s->sent_at, s->sent_at + 1, sizeof(s->sent_at) - sizeof(s->sent_at[0]));
+    s->sent_at[RATE_SENDS - 1] = s->ticks ? s->ticks : 1;
+    s->shown = want;
+    if (want)
+        s->log("discord: SET_ACTIVITY sent (start %llu, large image %s, one button)",
+               s->start_ms, TL_DISCORD_LARGE_IMAGE);
+    else
+        s->log("discord: the activity is cleared (the connection stays open)");
 }
 
 static void handle_frame(discord_state *s, unsigned opcode, const unsigned char *payload, int len)
@@ -167,12 +208,16 @@ static void handle_frame(discord_state *s, unsigned opcode, const unsigned char 
     int error = has(json, "\"evt\":\"ERROR\"") || has(json, "\"evt\": \"ERROR\"");
 
     if (opcode == 2) {
-        /* Discord answers a bad handshake with CLOSE, not FRAME: the error code
-         * and message are in this payload, so they have to be read here too. */
-        if (len > 2) log_reply(s, "close reply", json, len);
-        if (strstr(json, "\"code\":")) log_error(s, json);
-        s->log("discord: the client closed the connection");
-        disconnect(s, 0);
+        /* Discord answers a bad handshake, a signed-out client or its own
+         * shutdown with CLOSE: the code and message are in this payload. Wait
+         * longer before the next try, and keep the log quiet until it works. */
+        if (!s->quiet) {
+            if (len > 2) log_reply(s, "close reply", json, len);
+            if (strstr(json, "\"code\":")) log_error(s, json);
+            s->log("discord: the client closed the connection; trying again every 10 s (quietly)");
+        }
+        disconnect(s, 0, RETRY_REFUSED_TICKS);
+        s->quiet = 1;
         return;
     }
     if (opcode != 1) return;
@@ -180,38 +225,30 @@ static void handle_frame(discord_state *s, unsigned opcode, const unsigned char 
     if (s->stage == ST_HANDSHAKE) {
         log_reply(s, "handshake reply", json, len);
         if (has(json, "\"evt\":\"READY\"") || has(json, "\"evt\": \"READY\"")) {
-            if (send_frame(s, 1, s->activity, (int)strlen(s->activity)) == 0) {
-                s->log("discord: SET_ACTIVITY sent (start %llu, large image %s, one button)",
-                       s->start_ms, TL_DISCORD_LARGE_IMAGE);
-                s->stage = ST_ACTIVITY;
-            } else {
-                s->log("discord: SET_ACTIVITY could not be written");
-                disconnect(s, 0);
-            }
+            s->stage = ST_READY;
+            s->shown = 0;
+            s->quiet = 0;
         } else if (error) {
             log_error(s, json);
-            disconnect(s, 0);
+            disconnect(s, 0, RETRY_REFUSED_TICKS);
         }
         return;
     }
-    if (s->stage == ST_ACTIVITY) {
+    if (has(json, "pvz2-activity")) {
         log_reply(s, "SET_ACTIVITY reply", json, len);
         if (error) log_error(s, json);
-        s->stage = ST_LIVE;
+    } else if (has(json, "pvz2-clear")) {
+        if (error) log_error(s, json);
+        else s->log("discord: Discord confirmed the activity is cleared");
     }
 }
 
 static void pump(discord_state *s)
 {
-    if (!atomic_load_explicit(&g_enabled, memory_order_relaxed)) {
-        if (s->stage != ST_OFFLINE) {
-            s->log("discord: the setting is off: nothing is sent");
-            disconnect(s, 1);
-        }
-        return;
-    }
+    int want = atomic_load_explicit(&g_enabled, memory_order_relaxed);
+
     if (s->stage == ST_OFFLINE) {
-        if (s->ticks < s->retry_at) return;
+        if (!want || s->ticks < s->retry_at) return;
         if (tl_discord_transport_open(&s->conn) != 0) {
             s->retry_at = s->ticks + RETRY_TICKS;
             if (s->ticks >= s->note_at) {
@@ -221,43 +258,63 @@ static void pump(discord_state *s)
             return;
         }
         s->rx_len = 0;
+        s->shown = 0;
         char handshake[128];
         snprintf(handshake, sizeof(handshake), "{\"v\":1,\"client_id\":\"%s\"}", s->client_id);
-        s->log("discord: connected to discord-ipc-%d, handshake v1, client id %s",
-               s->conn.index, *s->client_id ? s->client_id : "(empty)");
+        if (!s->quiet)
+            s->log("discord: connected to discord-ipc-%d, handshake v1, client id %s",
+                   s->conn.index, *s->client_id ? s->client_id : "(empty)");
         int written = (int)strlen(handshake);
         if (send_frame(s, 0, handshake, written) != 0) {
-            s->log("discord: the handshake could not be written");
-            disconnect(s, 0);
+            if (!s->quiet) s->log("discord: the handshake could not be written");
+            disconnect(s, 0, RETRY_TICKS);
             return;
         }
-        s->log("discord: handshake frame written (%d bytes)", written + 8);
+        if (!s->quiet) s->log("discord: handshake frame written (%d bytes)", written + 8);
         s->stage = ST_HANDSHAKE;
         return;
     }
-    if (s->stage == ST_LIVE) return;
 
+    /* Read on every tick in every stage: an EOF or a broken pipe is how a quit,
+     * restarted or updating Discord shows up, and the reconnect starts there. */
     int n = tl_discord_transport_read(&s->conn, s->rx + s->rx_len,
                                       (int)sizeof(s->rx) - s->rx_len);
     if (n < 0) {
-        s->log("discord: the connection ended");
-        disconnect(s, 0);
+        s->log("discord: the connection ended; trying again every 2 s");
+        disconnect(s, 0, RETRY_TICKS);
         return;
     }
     s->rx_len += n;
-    while (s->rx_len >= 8) {
+    while (s->stage != ST_OFFLINE && s->rx_len >= 8) {
         unsigned opcode = get32(s->rx), len = get32(s->rx + 4);
         if (len > 4096) {
             s->log("discord: a frame was too large (%u); trying again", len);
-            disconnect(s, 0);
+            disconnect(s, 0, RETRY_TICKS);
             return;
         }
         if (s->rx_len < 8 + (int)len) break;
-        handle_frame(s, opcode, s->rx + 8, (int)len);
         int used = 8 + (int)len;
+        handle_frame(s, opcode, s->rx + 8, (int)len);
+        /* handle_frame may have disconnected, which empties the buffer. */
+        if (s->stage == ST_OFFLINE) return;
         memmove(s->rx, s->rx + used, (size_t)(s->rx_len - used));
         s->rx_len -= used;
-        if (s->stage == ST_OFFLINE || s->stage == ST_LIVE) break;
+    }
+    if (s->stage != ST_READY) return;
+
+    if (want != s->shown && may_send(s)) {
+        send_state(s, want);
+        if (s->stage == ST_OFFLINE) return;
+    }
+    if (want) {
+        s->off_since = 0;
+    } else if (!s->shown) {
+        if (!s->off_since) s->off_since = s->ticks ? s->ticks : 1;
+        else if (s->ticks - s->off_since >= OFF_CLOSE_TICKS) {
+            s->log("discord: the setting has been off for a minute: the connection is closed");
+            disconnect(s, 1, RETRY_TICKS);
+            s->off_since = 0;
+        }
     }
 }
 
@@ -269,7 +326,7 @@ static void *worker(void *unused)
         g.ticks++;
         tl_discord_sleep_ms(TICK_MS);
     }
-    if (g.stage != ST_OFFLINE) disconnect(&g, 1);
+    if (g.stage != ST_OFFLINE) disconnect(&g, 1, RETRY_TICKS);
     atomic_store_explicit(&g_stopped, true, memory_order_relaxed);
     return NULL;
 }
