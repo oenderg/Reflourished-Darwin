@@ -70,6 +70,10 @@ mod's own content built in.
 * `Esc` pauses and resumes. The keys rest while the game is paused.
 * On the Mac and Windows, Settings (`Cmd-,` / `Ctrl-,`) lets you pick any keys; Keyboard →
   **Show keys in levels** (on by default) writes each key at its control's corner in the game's font.
+* **Plant on: Release / Press** in Mac Keyboard or Windows Gameplay settings chooses when the
+  click after a keyboard seed or shovel pick takes effect. Release is the default. Press completes
+  the tap on button down and ignores that click's remaining drag and release. Ordinary seed-packet
+  drags and other clicks are unchanged.
 * On iPad, keys appear after the first press on a hardware keyboard.
 
 </details>

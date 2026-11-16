@@ -28,6 +28,7 @@ typedef struct {
     int adapt_shape;      /* 1: the game starts in the window's shape (4:3 to 21:9) */
     char fixed_aspect[16]; /* display, game, or one of the named ratios */
     int show_level_keys;  /* 1: draw the key on each control in a live level */
+    int plant_on_press;   /* 1: complete a keyboard-picked seed or shovel click on down */
     int show_cursor_plant; /* 1: draw the selected plant and its cross at the pointer */
     int cursor_cross_brightness; /* 0..100, percent of white for the cross bands */
     int automatic_updates; /* 1: the installed build checks for updates once a day */

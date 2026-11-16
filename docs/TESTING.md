@@ -228,6 +228,16 @@ names each action and why it was refused:
 
 ## Reading the result
 
+For Plant on, launch a Mac test with `-plantOnPress YES` (the default is `NO`), or choose
+Press in Windows Settings -> Gameplay. Pick an affordable, ready seed with its key, hold the
+mouse down on an empty lawn tile, and capture a frame before releasing. The plant should
+already be there and the log should say `plant on press: completed touch`. Move while held,
+then release: no second action should occur. Repeat with Release: planting waits for the up.
+In both modes drag directly from a seed packet to the lawn and check that it still waits for
+release. Also check another key replacing the pick, the same key cancelling it, a card click,
+Escape, an unavailable card, and the keyboard shovel. Only a keyboard-created cursor still
+matching the board's pending cursor qualifies; plant food and power-ups are unchanged.
+
 For the pointer cross, use a test bundle ID and copied save, enable `-showCursorPlant YES` and
 `TL_PVZ2_CURSOR_CHECK=1`, then select a plant and click on either side of tile boundaries. The
 `cursor check` line compares the surface point's predicted column and row with the game's active

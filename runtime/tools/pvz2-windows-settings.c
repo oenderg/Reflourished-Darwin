@@ -99,6 +99,7 @@ void pvz2_settings_load(const char *path, pvz2_settings *s)
     for (int i = 0; i < 7; i++) if (!strcmp(valid[i], s->fixed_aspect)) known = 1;
     if (!known) snprintf(s->fixed_aspect, sizeof(s->fixed_aspect), "display");
     s->show_level_keys = ini_int(path, "keys", "showLevelKeys", d.show_level_keys);
+    s->plant_on_press = ini_int(path, "keys", "plantOnPress", d.plant_on_press) == 1;
     s->automatic_updates = ini_int(path, "updates", "automaticChecks", d.automatic_updates) != 0;
     s->show_cursor_plant = ini_int(path, "pointer", "showCursorPlant", d.show_cursor_plant) != 0;
     s->cursor_cross_brightness = ini_int(path, "pointer", "crossBrightness", d.cursor_cross_brightness);
@@ -129,6 +130,7 @@ int pvz2_settings_save(const char *path, const pvz2_settings *s)
     WritePrivateProfileStringA("window", "fixedAspect", s->fixed_aspect, path);
     WritePrivateProfileStringA("window", "adaptShape", s->adapt_shape ? "1" : "0", path);
     WritePrivateProfileStringA("keys", "showLevelKeys", s->show_level_keys ? "1" : "0", path);
+    WritePrivateProfileStringA("keys", "plantOnPress", s->plant_on_press ? "1" : "0", path);
     WritePrivateProfileStringA("updates", "automaticChecks", s->automatic_updates ? "1" : "0", path);
     WritePrivateProfileStringA("pointer", "showCursorPlant", s->show_cursor_plant ? "1" : "0", path);
     {
@@ -243,6 +245,7 @@ const char *pvz2_settings_key_owner(const pvz2_settings *s, const char *name)
 #define ID_OPEN_DATA     203
 #define ID_ADAPT_SHAPE   204
 #define ID_SHOW_KEYS     205
+#define ID_PLANT_ON      219
 #define ID_SHOW_CURSOR   206
 #define ID_CROSS_BRIGHTNESS 207
 #define ID_CROSS_VALUE   208
@@ -538,6 +541,15 @@ static void build_pointer_page(HWND p)
     add_ruled(p, L"STATIC", L"", 0, 410, 206, 60, 20, ID_CROSS_VALUE, A_RIGHT, 0);
     add_ruled(p, L"STATIC", L"The plant, shovel or plant food in your hand follows the pointer, as it would under your finger, and a cross marks the tile it will land on; the cross hides where a plant cannot go. “Cross brightness” sets how bright the cross is: 45% by default.",
               0, 24, 238, 460, 80, 0, W_FULL, 220);
+    add_ruled(p, L"BUTTON", L"Key-picked seeds and shovel", BS_GROUPBOX, 10, 344, 500, 112, 0, W_FULL, 0);
+    add(p, L"STATIC", L"Plant on:", 0, 24, 370, 120, 22, 0);
+    HWND plant = add(p, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
+                     180, 366, 160, 100, ID_PLANT_ON);
+    SendMessageW(plant, CB_ADDSTRING, 0, (LPARAM)L"Release");
+    SendMessageW(plant, CB_ADDSTRING, 0, (LPARAM)L"Press");
+    SendMessageW(plant, CB_SETCURSEL, g_pending.plant_on_press, 0);
+    add_ruled(p, L"STATIC", L"Release is the default. Press uses the click immediately after a keyboard pick; dragging from a seed packet is unchanged.",
+              0, 24, 400, 460, 42, 0, W_FULL, 220);
     pointer_page_label();
 
 }
@@ -923,6 +935,10 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case ID_SHOW_KEYS:
             g_pending.show_level_keys = (int)SendMessageW((HWND)lp, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            return 0;
+        case ID_PLANT_ON:
+            if (HIWORD(wp) == CBN_SELCHANGE)
+                g_pending.plant_on_press = SendMessageW((HWND)lp, CB_GETCURSEL, 0, 0) == 1;
             return 0;
         case ID_SHOW_CURSOR:
             g_pending.show_cursor_plant = (int)SendMessageW((HWND)lp, BM_GETCHECK, 0, 0) == BST_CHECKED;

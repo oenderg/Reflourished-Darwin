@@ -621,6 +621,7 @@ static void settings_applied(void *user, const pvz2_settings *s)
     g_start_fullscreen = s->start_fullscreen;
     g_settings = *s;
     g_show_keys = s->show_level_keys;
+    tl_pvz2_set_plant_on_press(s->plant_on_press);
     g_show_cursor_plant = s->show_cursor_plant;
     g_cross_brightness = s->cursor_cross_brightness;
     pvz2_updates_set_automatic(s->automatic_updates);
@@ -4111,6 +4112,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     /* The shortcuts are the Mac's: the game's own card press for a seed packet
      * and its own shovel, so neither needs coordinates at any surface size. */
     tl_pvz2_set_seed_pick(1);
+    tl_pvz2_set_plant_on_press(g_settings.plant_on_press);
     tl_pvz2_set_native_shovel(2);
 #if defined(__x86_64__)
     const char *preview = getenv("TL_PVZ2_PREVIEW_PREPARE");

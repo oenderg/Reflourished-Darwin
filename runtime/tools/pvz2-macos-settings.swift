@@ -38,6 +38,7 @@ private enum Key {
     static let renderSharp = "renderSharp"
     /// The in-level key badges, on by default.
     static let showLevelKeys = "showLevelKeys"
+    static let plantOnPress = "plantOnPress"
     static let showCursorPlant = "showCursorPlant"
     static let cursorCrossBrightness = "cursorCrossBrightness"
     /// Sparkle's own key; the host hands a change to the updater
@@ -372,6 +373,7 @@ private struct GeneralPane: View {
 
 private struct KeyboardPane: View {
     @AppStorage(Key.showLevelKeys) private var showLevelKeys = true
+    @AppStorage(Key.plantOnPress) private var plantOnPress = false
     @AppStorage(Key.showCursorPlant) private var showCursorPlant = true
     @AppStorage(Key.cursorCrossBrightness) private var cursorCrossBrightness = 0.45
 
@@ -410,6 +412,15 @@ private struct KeyboardPane: View {
                     }
                 }
                 KeyRow(label: "Fast-forward", key: Key.fastForward, fallback: Key.defaultFastForward)
+                ResettableRow(title: "Plant on", isDefault: !plantOnPress,
+                              reset: { plantOnPress = false }) {
+                    Picker("Plant on", selection: $plantOnPress) {
+                        Text("Release").tag(false)
+                        Text("Press").tag(true)
+                    }
+                    .labelsHidden()
+                    .frame(width: 140)
+                }
                 KeyRow(label: "Plant food", key: Key.plantFood, fallback: Key.defaultPlantFood)
             } header: {
                 Text("Playing")
@@ -448,7 +459,7 @@ private struct KeyboardPane: View {
             } header: {
                 Text("Seed packets")
             } footer: {
-                Text("A key takes that seed packet in hand; click the lawn to plant it. The same key again puts it back.")
+                Text("A key takes that seed packet in hand; click the lawn to plant it. The same key again puts it back. Plant on chooses Release (the default) or Press for the click after a key pick, including the shovel. Dragging from a seed packet is unchanged.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

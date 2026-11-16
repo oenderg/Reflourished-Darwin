@@ -690,6 +690,12 @@ static void J_config_write_bool(tl_jcall *c)
 typedef struct { uint32_t id; int phase, x, y, px, py; double time_s; } pvz_touch;
 static pvz_touch g_cursor_check_down;
 static bool g_cursor_check_queued;
+static atomic_int g_plant_on_press;
+/* Only the game thread owns these identities. A matching live pending cursor,
+ * not this saved address alone, authorizes completing a click on press. */
+static uint64_t g_key_cursor_board, g_key_cursor;
+static uint32_t g_press_swallowed_id;
+static bool guest_key_cursor_pending(void);
 typedef struct { char text[64]; int action; double time_s; } pvz_text;
 typedef struct { int keycode, down; double time_s; } pvz_key;
 static struct {
@@ -761,6 +767,19 @@ static void J_process_events(tl_jcall *c)
     pthread_mutex_lock(&TQ.mu);
     while (TQ.n > 0 && used + 48 <= limit - 16) {
         pvz_touch t = TQ.v[0];
+        bool complete = false;
+        if (t.phase == 0) {
+            complete = atomic_load(&g_plant_on_press) && guest_key_cursor_pending();
+            if (complete && used + 96 > limit - 16) break;
+            /* Every real down consumes the key pick's eligibility, including
+             * a click on its card or another UI control that cancels it. */
+            g_key_cursor = g_key_cursor_board = 0;
+            if (complete) g_press_swallowed_id = t.id;
+        } else if (t.id == g_press_swallowed_id) {
+            if (t.phase == 3 || t.phase == 4) g_press_swallowed_id = 0;
+            memmove(&TQ.v[0], &TQ.v[1], (size_t)(--TQ.n) * sizeof(TQ.v[0]));
+            continue;
+        }
         if (t.phase == 0 && getenv("TL_PVZ2_CURSOR_CHECK")) {
             g_cursor_check_down = t;
             g_cursor_check_queued = true;
@@ -781,6 +800,15 @@ static void J_process_events(tl_jcall *c)
         w[9] = (uint32_t)t.phase;               /* +36 phase */
         w[10] = 0xdeadbeef; w[11] = 0xdeadbeef; /* +40, +44 sentinels */
         p += 48; used += 48; count++;
+        if (complete) {
+            /* Both halves use the same finger and point. The physical drag
+             * and release are discarded even if the setting changes meanwhile. */
+            memcpy(p, p - 48, 48);
+            ((uint32_t *)p)[9] = 3;
+            p += 48; used += 48; count++;
+            tl_log_line("pvz2: plant on press: completed touch %u at (%d,%d); swallowing its drag and release",
+                        t.id, t.x, t.y);
+        }
     }
     pthread_mutex_unlock(&TQ.mu);
     pthread_mutex_lock(&TXQ.mu);
@@ -2999,6 +3027,11 @@ void tl_pvz2_set_seed_pick(int on)
     tl_log_line("pvz2: the native seed pick is %s", on ? "on (the game's own press)" : "off");
 }
 
+void tl_pvz2_set_plant_on_press(int on)
+{
+    atomic_store(&g_plant_on_press, on != 0);
+}
+
 void tl_pvz2_request_seed_pick(int slot)
 {
     if (!atomic_load(&g_seed_pick_on)) {
@@ -3785,13 +3818,29 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
                     what, (void *)pending, (void *)cursor);
         return -1;
     }
+    g_key_cursor_board = board;
+    g_key_cursor = cursor;
     tl_log_line("pvz2: %s: the cursor %p is pending, waiting for the player's click",
                 what, (void *)cursor);
     return 1;
 }
 
+static bool guest_key_cursor_pending(void)
+{
+    if (!g_key_cursor) return false;
+    bool ok = false;
+    uint64_t board = guest_call2(guest_code(GUEST_BOARD_GETTER), 0, 0, &ok);
+    uint64_t pending = 0;
+    if (ok && board == g_key_cursor_board &&
+        guest_read_bytes(board + 0x408, &pending, sizeof pending) && pending == g_key_cursor)
+        return true;
+    g_key_cursor = g_key_cursor_board = 0;
+    return false;
+}
+
 static void guest_seed_pick(int slot)
 {
+    g_key_cursor = g_key_cursor_board = 0;
     if (!guest_live_shortcut_board("the seed shortcut")) return;
     bool ok = false;
     uint64_t board = 0;
@@ -3884,6 +3933,7 @@ static bool guest_pause_menu_rect(int *r)
  * else it is Back. */
 static void guest_escape(void)
 {
+    g_key_cursor = g_key_cursor_board = 0;
     int rect[4] __attribute__((aligned(16))) = { 0, 0, 0, 0 };
     double cx, cy;
     const char *what;
@@ -3915,6 +3965,7 @@ static void guest_escape(void)
 /* The shovel, on the guest's thread. */
 static void guest_native_shovel(void)
 {
+    g_key_cursor = g_key_cursor_board = 0;
     if (!guest_live_shortcut_board("the shovel shortcut")) return;
     int mode = atomic_load(&g_shovel_mode);
     void *widget = guest_find_widget("UIShovel");
@@ -5839,6 +5890,9 @@ static void *gl_main(void *arg)
         /* The memory warning, on the game's own thread. */
         if (atomic_exchange(&g_low_memory_pending, 0)) guest_low_memory_warning();
         /* The host's own touches: any that are left down are released. */
+        /* Forget a retired cursor before its address can be reused by a later
+         * selection. The board remains the authority after game-side cancels. */
+        if (g_key_cursor) guest_key_cursor_pending();
         if ((tl_pvz2_frames() % 30) == 0) tl_pvz2_release_stuck_touches();
         /* The orientation change, on the game's own thread. */
         if (atomic_exchange(&g_orientation_pending, 0))

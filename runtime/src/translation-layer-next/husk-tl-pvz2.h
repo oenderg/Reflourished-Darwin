@@ -162,6 +162,8 @@ void tl_pvz2_touch_injected(int phase, int id, float x, float y);
  * and done there; no touch is injected. */
 void tl_pvz2_set_seed_pick(int on);
 void tl_pvz2_request_seed_pick(int slot);
+/* Complete the next click on a keyboard-picked seed or shovel on its down. */
+void tl_pvz2_set_plant_on_press(int on);
 
 /* Collect the current suns, real coins, gems and plant food through their
  * native click/flight path, on the game thread. Ignored outside unpaused,

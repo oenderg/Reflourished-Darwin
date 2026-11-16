@@ -22,12 +22,14 @@ int main(void)
     CHECK(s.confirm_quit);
     CHECK(s.show_level_keys && s.show_cursor_plant && s.cursor_cross_brightness == 45);
     CHECK(s.automatic_updates);
+    CHECK(!s.plant_on_press);
     WritePrivateProfileStringA("window", "adaptShape", "1", path);
     WritePrivateProfileStringA("window", "keepSizeAndPlace", "0", path);
     WritePrivateProfileStringA("keys", "seed1", "J", path);
     WritePrivateProfileStringA("keys", "shovel", "", path);
     WritePrivateProfileStringA("keys", "collectSun", "F9", path);
     WritePrivateProfileStringA("keys", "showLevelKeys", "0", path);
+    WritePrivateProfileStringA("keys", "plantOnPress", "1", path);
     WritePrivateProfileStringA("pointer", "showCursorPlant", "0", path);
     WritePrivateProfileStringA("pointer", "crossBrightness", "71", path);
     WritePrivateProfileStringA("updates", "automaticChecks", "0", path);
@@ -35,6 +37,7 @@ int main(void)
     CHECK(s.adapt_shape && !strcmp(s.slot[0], "J") && !*s.shovel);
     CHECK(!strcmp(s.collect_sun, "F9") && !s.show_level_keys && !s.show_cursor_plant && s.cursor_cross_brightness == 71);
     CHECK(!s.automatic_updates);
+    CHECK(s.plant_on_press);
     s.automatic_updates = 1;
     s.adapt_shape = 0;
     s.confirm_quit = 0;
@@ -43,6 +46,7 @@ int main(void)
     pvz2_settings_load(path, &s);
     CHECK(!s.adapt_shape && !strcmp(s.fixed_aspect, "4:3"));
     CHECK(!s.confirm_quit);
+    CHECK(s.plant_on_press);
     CHECK(!strcmp(s.slot[0], "J") && !*s.shovel && s.cursor_cross_brightness == 71);
     CHECK(pvz2_settings_aspect(&s, NULL) == 4.0 / 3.0);
     WritePrivateProfileStringA("window", "resizeMode", NULL, path);
@@ -52,6 +56,12 @@ int main(void)
     WritePrivateProfileStringA("pointer", "crossBrightness", "999", path);
     pvz2_settings_load(path, &s);
     CHECK(s.adapt_shape && !strcmp(s.fixed_aspect, "display") && s.cursor_cross_brightness == 100);
+    WritePrivateProfileStringA("keys", "plantOnPress", "9", path);
+    pvz2_settings_load(path, &s);
+    CHECK(!s.plant_on_press);
+    pvz2_settings_save(path, &s);
+    pvz2_settings_load(path, &s);
+    CHECK(!s.plant_on_press);
     DeleteFileA(path);
     printf("settings migration: %s (%d failures)\n", failed ? "FAIL" : "PASS", failed);
     return failed ? 1 : 0;

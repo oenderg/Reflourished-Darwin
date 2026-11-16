@@ -3217,6 +3217,7 @@ static void start_updater(void)
                                                           object:nil queue:NSOperationQueue.mainQueue
                                                       usingBlock:^(NSNotification *note) {
             (void)note;
+            tl_pvz2_set_plant_on_press([[NSUserDefaults standardUserDefaults] boolForKey:@"plantOnPress"]);
             [g_view followDisplayScale];
             [g_view badgesSettingChanged];
             [g_view cursorSettingChanged];
@@ -3439,6 +3440,7 @@ static void start_updater(void)
     tl_pvz2_set_native_shovel(native_shovel_mode());
     /* The native seed pick: the game's own press. */
     tl_pvz2_set_seed_pick(native_seed_pick_mode());
+    tl_pvz2_set_plant_on_press([[NSUserDefaults standardUserDefaults] boolForKey:@"plantOnPress"]);
 
     /* The guest's own memory warning. The game's Java has no memory callback
      * at all, so the host is the activity: the host is told about the memory
