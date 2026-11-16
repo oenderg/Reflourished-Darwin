@@ -37,6 +37,10 @@ on:
         description: "Skip the Windows smoke test, so publishing does not wait for it (only after checking a failure yourself)"
         type: boolean
         default: false
+      from_run:
+        description: "With publish: publish the files an earlier test run built (its run number) instead of building them again. Its commit must be this one or an older one with only text changed since (scripts/check-promote.sh)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -50,7 +54,16 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # from_run: the tested run's commit and what changed since
       - run: scripts/check-repo.sh
+      - name: The tested run whose files this run publishes
+        if: github.event.inputs.from_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_RUN: ${{ github.event.inputs.from_run }}
+          PUBLISH: ${{ github.event.inputs.publish }}
+        run: scripts/check-promote.sh "$FROM_RUN" "$PUBLISH"
       # A publishing run that would publish the wrong thing stops here, before an hour of building.
       - name: What this run would publish
         if: github.event.inputs.publish == 'true'
@@ -63,7 +76,8 @@ jobs:
   build:
     name: iPhone, iPad and Mac
     needs: check
-    if: github.event.inputs.platforms != 'Windows'
+    # A run with from_run builds nothing: it publishes the files of the run it names.
+    if: github.event.inputs.from_run == '' && github.event.inputs.platforms != 'Windows'
     # The Xcode 27 image, so the release is built with the same SDK as a local build
     # (Xcode 27). An app built with an older SDK is treated differently by iPadOS 27:
     # the 26.5 SDK builds were held to full-screen sizes on the iPad while the local
@@ -229,7 +243,9 @@ jobs:
   windows-arm64:
     name: Windows ARM64 programs
     needs: check
-    if: github.event.inputs.platforms == 'All' || github.event.inputs.platforms == 'Windows'
+    if: >-
+      github.event.inputs.from_run == '' &&
+      (github.event.inputs.platforms == 'All' || github.event.inputs.platforms == 'Windows')
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -501,12 +517,14 @@ jobs:
   # (made as a draft, filled, then made public), its text, the AltStore source and both update
   # feeds. A failed or cancelled build publishes nothing, and nor does a Windows build whose
   # smoke test failed (the installed copies update themselves to it), unless the run skipped
-  # the smoke test. On a Mac, for Sparkle's sign_update.
+  # the smoke test. A run with from_run builds nothing and publishes the files of the run it names,
+  # once the check job has passed it (scripts/check-promote.sh). On a Mac, for Sparkle's sign_update.
   publish:
     name: Publish
-    needs: [build, windows, smoke]
+    needs: [check, build, windows, smoke]
     if: >-
-      always() && github.event.inputs.publish == 'true' &&
+      always() && github.event.inputs.publish == 'true' && needs.check.result == 'success' &&
+      (github.event.inputs.from_run != '' || (
       (needs.build.result == 'success' ||
         (github.event.inputs.platforms == 'Windows' && needs.build.result == 'skipped')) &&
       (needs.windows.result == 'success' ||
@@ -514,7 +532,7 @@ jobs:
           needs.windows.result == 'skipped')) &&
       (needs.smoke.result == 'success' ||
         (needs.smoke.result == 'skipped' &&
-          (github.event.inputs.skip_smoke == 'true' || needs.windows.result == 'skipped')))
+          (github.event.inputs.skip_smoke == 'true' || needs.windows.result == 'skipped')))))
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -543,14 +561,16 @@ jobs:
 
       # The files are single-file run files (archive: false). download-artifact unpacks a .zip
       # one, so the Windows zips would arrive as their contents; the API hands each back as it is.
+      # This run's, or with from_run the tested run's.
       - name: Download the release files
         env:
           GH_TOKEN: ${{ github.token }}
           PREFIX: ${{ steps.metadata.outputs.prefix }}
+          FILES_RUN: ${{ github.event.inputs.from_run || github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p release
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FILES_RUN/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.name | test("^PvZ2-Reflourished-.*-(iOS(-Full)?[.]ipa|Mac(-Full)?[.]dmg|Windows-(Setup[.]exe|x64[.]zip|ARM64[.]zip))$")) | "\(.id) \(.name)"' |
           while read -r id name; do
             case "$name" in "$PREFIX"-*) ;; *) echo "$name is not this release's ($PREFIX)" >&2; exit 1 ;; esac

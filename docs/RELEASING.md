@@ -20,6 +20,7 @@ Actions > **Build** > Run workflow, with:
 | `replace_release` | off (default); on, with `publish`: replace the files of a release that is out already (a rebuild of one platform, say). Off, a published tag stops the run |
 | `release_tag` | optional; empty = `v<VERSION>` (for example `v1.0.0`) |
 | `skip_smoke` | off (default); on: no Windows smoke test, so publishing does not wait for it. Only after checking a failed smoke test yourself (below) |
+| `from_run` | optional, with `publish`: the number of an earlier test run (from its page's address) whose files to publish instead of building them again ("Publishing a tested run", below) |
 
 **The repository's own APK.** The mod's only download hosts (Google Drive and MEGA) are unreliable
 for a machine, so this repository keeps the APK as an asset of a **draft** release named
@@ -87,6 +88,26 @@ seconds, and again just before the upload, in case another run published the tag
 - `build-inputs`, the draft that holds the build's inputs.
 
 The upload step itself also stops on a published release without `replace_release`.
+
+**Publishing a tested run.** The usual release is a test build with `publish` off, checked on the
+devices, then a publishing run. Instead of building everything again, that run can take the test
+run's files: `gh workflow run build.yml --ref main -f publish=true -f from_run=<run number>`. It
+builds and smoke-tests nothing, so the release is the very files that were tested.
+`scripts/check-promote.sh` checks in the first job that:
+
+- the run is a Build run of this repository that passed, and if it built Windows files, both smoke
+  tests passed (a run with `skip_smoke` is no source);
+- its commit is the one being published or an older one in its history, and every file changed
+  since then is Markdown at the top, in `docs/` or in `release-notes/`, or one of the feeds the
+  publish job rewrites (`altstore/source.json`, `sparkle/appcast.xml`,
+  `sparkle/windows-appcast.xml`). Anything else, `VERSION`, `LICENSE`, the icon in `docs/banner/`
+  or `sparkle/public-key` included, may change what is built, and needs a new test run;
+- it still has this version's files (a test run keeps them for 14 days).
+
+So a fix to the release notes after the test run is fine: the publish job reads them from `main`.
+The tag is made on `main`'s commit, and the run's summary names the run and the commit the files
+came from. Test the release branch as it will land: if `main` has code the branch lacks, merging
+brings that code in, and the check refuses the test run's files.
 
 A run with **Publish** off creates no release, AltStore entry or feed item: it keeps the same files
 as artifacts of the run for 14 days (a publishing run keeps them for 7, so a release whose files
