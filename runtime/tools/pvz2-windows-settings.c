@@ -528,7 +528,7 @@ static void build_pointer_page(HWND p)
     SendMessageW(keys, BM_SETCHECK, g_pending.show_level_keys ? BST_CHECKED : BST_UNCHECKED, 0);
     add_ruled(p, L"STATIC", L"“Show keys in levels” writes the key that works each control on its corner, in the game's own font (seed packets, shovel, fast-forward, plant food and the level's power-ups); it is on by default.",
               0, 24, 60, 460, 54, 0, W_FULL, 220);
-    add_ruled(p, L"BUTTON", L"The pointer", BS_GROUPBOX, 10, 134, 500, 200, 0, W_FULL, 0);
+    add_ruled(p, L"BUTTON", L"The pointer", BS_GROUPBOX, 10, 134, 500, 176, 0, W_FULL, 0);
     HWND show = add(p, L"BUTTON", L"Show the selected plant at the pointer", BS_AUTOCHECKBOX,
                     24, 158, 440, 22, ID_SHOW_CURSOR);
     SendMessageW(show, BM_SETCHECK, g_pending.show_cursor_plant ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -540,16 +540,16 @@ static void build_pointer_page(HWND p)
     SendMessageW(bar, TBM_SETPOS, TRUE, g_pending.cursor_cross_brightness);
     add_ruled(p, L"STATIC", L"", 0, 410, 206, 60, 20, ID_CROSS_VALUE, A_RIGHT, 0);
     add_ruled(p, L"STATIC", L"The plant, shovel or plant food in your hand follows the pointer, as it would under your finger, and a cross marks the tile it will land on; the cross hides where a plant cannot go. “Cross brightness” sets how bright the cross is: 45% by default.",
-              0, 24, 238, 460, 80, 0, W_FULL, 220);
-    add_ruled(p, L"BUTTON", L"Key-picked seeds and shovel", BS_GROUPBOX, 10, 344, 500, 112, 0, W_FULL, 0);
-    add(p, L"STATIC", L"Plant on:", 0, 24, 370, 120, 22, 0);
+              0, 24, 238, 460, 60, 0, W_FULL, 220);
+    add_ruled(p, L"BUTTON", L"Key-picked seeds and shovel", BS_GROUPBOX, 10, 320, 500, 112, 0, W_FULL, 0);
+    add(p, L"STATIC", L"Plant on:", 0, 24, 346, 120, 22, 0);
     HWND plant = add(p, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL,
-                     180, 366, 160, 100, ID_PLANT_ON);
+                     180, 342, 160, 100, ID_PLANT_ON);
     SendMessageW(plant, CB_ADDSTRING, 0, (LPARAM)L"Release");
     SendMessageW(plant, CB_ADDSTRING, 0, (LPARAM)L"Press");
     SendMessageW(plant, CB_SETCURSEL, g_pending.plant_on_press, 0);
     add_ruled(p, L"STATIC", L"Release is the default. Press uses the click immediately after a keyboard pick; dragging from a seed packet is unchanged.",
-              0, 24, 400, 460, 42, 0, W_FULL, 220);
+              0, 24, 376, 460, 42, 0, W_FULL, 220);
     pointer_page_label();
 
 }
