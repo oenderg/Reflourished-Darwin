@@ -333,7 +333,18 @@ CPU (x64 on `windows-2025`, ARM64 on `windows-11-arm`), started twice by
 `runtime/win/smoke-test.ps1`. The first start is a new player's, with only the OBB (from the
 `obb_urls` in `data/game-*.json`, kept in the Actions cache): the x64 copy translates the game first,
 which took 17 minutes on the runner's 4 cores (1001 s, 3.8 cores busy; 2 minutes on a 24-thread PC). A start passes once the log's 5 s frame line
-shows frames drawn; the second must also find the x64 translation the first saved. The runners have
+shows frames drawn; the second must also load the x64 translation the first saved (the log's
+"functions loaded from the translation cache", not "functions translated in").
+
+The x64 translation is kept between runs in GitHub's cache (`data/translated`, about 290 MB), so a run
+usually skips the cold translation. Its key is a hash of what makes the translation: ScarletNX's pin
+and patch, the MSYS2 pins (LLVM), `runtime/win/x64/husk-tl-x64.c` and `data/game-*.json`, plus the
+runner's CPU name (ScarletNX's own key has the CPU in it). A run restores a kept translation with that
+key (`smoke-test.ps1 -Cached`), and its first start says whether it loaded it or translated; only a
+run that made a new one keeps it, once both starts passed. GitHub gives a run the caches of its own
+branch and of `main`, so a new branch's first run translates unless `main` has one. A change to the
+x64 side that ScarletNX can't see (a recompiler setting) belongs in one of the key's files, or the
+key needs it added. The runners have
 no GPU, so ANGLE draws through Windows' software renderer: the frames count, the frame rate does
 not. Each start must also draw the right picture: a picture of the game's window (`PrintWindow`, so other
 windows can't cover it) must be at least 90% like `runtime/win/smoke/first-<game version>.png`, the

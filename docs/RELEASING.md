@@ -58,7 +58,8 @@ versions `runtime/win/x64/msys2-clang64.txt` pins, builds ScarletNX with our pat
 between runs), the x86-64 programs, the setup with Inno Setup 7.1.1 and both portable zips.
 The Windows files have no Full variant: the setup and the zips download the game's data on first
 start. Then `smoke` starts each portable zip twice, x64 on `windows-2025` and ARM64 on
-`windows-11-arm` (docs/TESTING.md, "Windows smoke test"), and `publish` waits for it: a Windows
+`windows-11-arm` (docs/TESTING.md, "Windows smoke test"; x64 keeps its translation between runs),
+and `publish` waits for it: a Windows
 build that does not start, or draws the wrong picture, is not published, as the installed copies
 would update themselves to it. When it fails, look at the `smoke-x64` / `smoke-ARM64` pictures
 and logs. A new baseline picture (new title art, a new game version) is committed and the run

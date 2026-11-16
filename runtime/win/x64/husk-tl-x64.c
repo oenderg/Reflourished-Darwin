@@ -793,6 +793,8 @@ bool tl_x64_translate(const char *cache_dir, char *err, size_t errlen)
         snprintf(err, errlen, "%s", snx_recompiler_error(g_rec));
         return false;
     }
+    /* ScarletNX reports progress only once it translates: a module it loaded from the cache reported none. */
+    bool from_cache = !atomic_load(&g_progress_functions_total);
     /* The units are all in the module, descriptor, link and load included: what is left is the guest's start. */
     unsigned long long total = atomic_load(&g_progress_weight_total);
     if (total) atomic_store(&g_progress_weight, total);
@@ -803,7 +805,11 @@ bool tl_x64_translate(const char *cache_dir, char *err, size_t errlen)
     GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
     ULONGLONG cpu = ((ULONGLONG)kernel.dwHighDateTime << 32 | kernel.dwLowDateTime) +
                     ((ULONGLONG)user.dwHighDateTime << 32 | user.dwLowDateTime) - cpu0;
-    tl_log_line("x64: %zu functions translated in %.1f s", snx_recompiled_functions(g_mod), (double)wall / 1000.0);
+    if (from_cache)
+        tl_log_line("x64: %zu functions loaded from the translation cache in %.1f s", snx_recompiled_functions(g_mod),
+                    (double)wall / 1000.0);
+    else
+        tl_log_line("x64: %zu functions translated in %.1f s", snx_recompiled_functions(g_mod), (double)wall / 1000.0);
     tl_log_line("x64: translation used %.1f s CPU over %.1f s wall (%.1f cores)", (double)cpu / 10000000.0,
                 (double)wall / 1000.0, wall ? (double)cpu / 10000.0 / (double)wall : 0.0);
     if (t_th) snx_recompiled_bind(g_mod, &t_th->cpu);

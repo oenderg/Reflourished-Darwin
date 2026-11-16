@@ -437,7 +437,10 @@ jobs:
   # must find the translation and draw again, and both must draw the Welcome screen of
   # runtime/win/smoke/first-<game>.png. The runners have no GPU, so ANGLE draws through
   # Windows' software renderer: the frames count, the frame rate does not. The logs and
-  # pictures are kept as the smoke-<arch> artifact.
+  # pictures are kept as the smoke-<arch> artifact. The x64 translation is kept between runs
+  # (GitHub's cache: this branch's and main's), keyed on what makes it: ScarletNX, its patch,
+  # LLVM (the MSYS2 pins), our x64 side, the game's data and the runner's CPU. A run whose key
+  # matches loads it on the first start; anything else translates and keeps the new one.
   smoke:
     name: Windows smoke test (${{ matrix.arch }})
     needs: windows
@@ -496,11 +499,64 @@ jobs:
           $sum = (Get-FileHash "obb/$env:NAME" -Algorithm SHA256).Hash.ToLower()
           if ($sum -ne $env:SHA) { throw "the OBB has sha256 $sum, not $env:SHA" }
 
+      - name: The translation's key (x64)
+        id: tkey
+        if: matrix.arch == 'x64'
+        env:
+          INPUTS: ${{ hashFiles('runtime/win/x64/scarletnx/scarletnx.patch', 'runtime/win/x64/scarletnx/build-scarletnx.sh', 'runtime/win/x64/msys2-clang64.txt', 'runtime/win/x64/husk-tl-x64.c', 'data/game-*.json') }}
+        run: |
+          # ScarletNX's own key has the CPU in it: a translation made on another CPU would not load
+          $cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Name.Trim()
+          $slug = ($cpu.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
+          Write-Host "the runner's CPU: $cpu"
+          "key=x64-translation-$($env:INPUTS.Substring(0, 16))-$slug" >> $env:GITHUB_OUTPUT
+
+      # Restored by the prefix: each kept translation's key ends in its own file's name
+      - name: The translation an earlier run kept (x64)
+        id: tcache
+        if: matrix.arch == 'x64'
+        uses: actions/cache/restore@v6
+        with:
+          path: game/data/translated
+          key: ${{ steps.tkey.outputs.key }}
+          restore-keys: ${{ steps.tkey.outputs.key }}-
+
+      - name: What it holds (x64)
+        id: kept
+        if: matrix.arch == 'x64'
+        run: |
+          $dlls = @(Get-ChildItem game/data/translated -Filter *.dll -ErrorAction SilentlyContinue | ForEach-Object Name)
+          Write-Host "kept: $(if ($dlls) { $dlls -join ', ' } else { 'nothing' })"
+          "dlls=$($dlls -join ',')" >> $env:GITHUB_OUTPUT
+
       - name: Start the game twice
         env:
           NAME: ${{ steps.obb.outputs.name }}
           GAME: ${{ steps.obb.outputs.game }}
-        run: ./runtime/win/smoke-test.ps1 -Game game -Obb "obb/$env:NAME" -Out smoke -Baseline "runtime/win/smoke/first-$env:GAME.png"
+          KEPT: ${{ steps.kept.outputs.dlls }}
+        run: ./runtime/win/smoke-test.ps1 -Game game -Obb "obb/$env:NAME" -Out smoke -Baseline "runtime/win/smoke/first-$env:GAME.png" -Cached:([bool]$env:KEPT)
+
+      # Only after both starts passed. A new translation (none was kept, or the kept one did not
+      # fit) replaces the kept one and is saved under its own name; a loaded one is not saved again.
+      - name: The translation this run made (x64)
+        id: made
+        if: matrix.arch == 'x64'
+        env:
+          KEPT: ${{ steps.kept.outputs.dlls }}
+        run: |
+          $kept = @($env:KEPT -split ',' | Where-Object { $_ })
+          $new = @(Get-ChildItem game/data/translated -Filter *.dll | Where-Object { $kept -notcontains $_.Name })
+          if (-not $new) { Write-Host 'the kept translation was loaded: nothing new to keep'; exit 0 }
+          foreach ($old in $kept) { Remove-Item -LiteralPath "game/data/translated/$old" -Force }
+          Get-ChildItem game/data/translated | ForEach-Object { Write-Host "$($_.Name) $([Math]::Round($_.Length / 1MB)) MB" }
+          "name=$($new[0].BaseName)" >> $env:GITHUB_OUTPUT
+
+      - name: Keep the translation for the next run (x64)
+        if: matrix.arch == 'x64' && steps.made.outputs.name != ''
+        uses: actions/cache/save@v6
+        with:
+          path: game/data/translated
+          key: ${{ steps.tkey.outputs.key }}-${{ steps.made.outputs.name }}
 
       - name: Keep the logs and screenshots
         if: always()

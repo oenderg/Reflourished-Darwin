@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Start a portable Windows build twice and check that it draws what it should, in CI or by hand:
 #
-#   pwsh runtime/win/smoke-test.ps1 -Game <unpacked zip folder> -Obb <main...obb> -Out <folder> [-Baseline <png>]
+#   pwsh runtime/win/smoke-test.ps1 -Game <unpacked zip folder> -Obb <main...obb> -Out <folder> [-Baseline <png>] [-Cached]
 #   pwsh runtime/win/smoke-test.ps1 -Picture <png> -Baseline <png>      (how alike two pictures are)
 #
 # The first start is a new player's: no data but the OBB (linked in, so it is not downloaded), so the x64
-# build translates the game first. The second start must find the translation it saved (x64). Each start
+# build translates the game first. With -Cached, the data folder already holds an earlier run's translation
+# (CI keeps one between runs, keyed on what makes it): the first start may load it instead, and says which.
+# The second start must load the translation from the cache (x64). Each start
 # passes once the game draws frames and, with -Baseline, once a picture of its window matches the baseline
 # (at least -Match percent alike, within 30 s). Each start's log and picture go to -Out.
 # Exits 1 when a start shows an error, ends on its own, draws nothing in time or draws the wrong picture.
@@ -17,7 +19,8 @@ param(
     [string]$Picture,
     [int]$Match = 90,
     [int]$FirstMinutes = 40,
-    [int]$SecondMinutes = 5
+    [int]$SecondMinutes = 5,
+    [switch]$Cached
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -182,10 +185,14 @@ function Start-Game([string]$name, [int]$minutes, [string[]]$must) {
     return $ok
 }
 
-$first = Start-Game 'first' $FirstMinutes $(if ($x64) { @('functions translated in') } else { @() })
+$first = Start-Game 'first' $FirstMinutes $(if ($x64 -and -not $Cached) { @('functions translated in') } else { @() })
+if ($x64 -and $Cached) {
+    $how = if ((Get-Content -Raw -LiteralPath (Join-Path $Out 'first.log')) -match 'functions loaded from the translation cache') { 'loaded the kept translation' } else { 'translated (the kept one did not fit)' }
+    Write-Host "smoke: first start: $how"
+}
 $second = $false
 if ($first) {
-    $second = Start-Game 'second' $SecondMinutes $(if ($x64) { @('the x64 translation cache is there') } else { @() })
+    $second = Start-Game 'second' $SecondMinutes $(if ($x64) { @('functions loaded from the translation cache') } else { @() })
 }
 if ($first -and $second -and $noBaseline) { Write-Host 'smoke: FAILED: both starts drew, but there is no baseline to compare with'; exit 1 }
 if ($first -and $second) { Write-Host 'smoke: both starts drew the picture they should'; exit 0 }

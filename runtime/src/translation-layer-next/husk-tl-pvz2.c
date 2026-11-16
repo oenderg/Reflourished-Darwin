@@ -2669,7 +2669,7 @@ bool tl_pvz2_start(const tl_ga_config *cfg)
     {
         char cache[1100], err[300];
         snprintf(cache, sizeof(cache), "%s/translated", P.data);
-        tl_log_line("pvz2: translating the game's code for this computer (the first start takes minutes) into %s", cache);
+        tl_log_line("pvz2: the game's code for this computer: the translation in %s (made on the first start)", cache);
         if (!tl_x64_translate(cache, err, sizeof(err))) { tl_log_line("pvz2: the translation failed: %s", err); return false; }
     }
 #endif
