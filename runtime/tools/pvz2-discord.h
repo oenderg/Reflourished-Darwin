@@ -17,10 +17,10 @@
 #define TL_DISCORD_APPLICATION_ID "1571926819857244202"
 #define TL_DISCORD_APP_NAME "PvZ2: Reflourished"
 #define TL_DISCORD_BUTTON_LABEL TL_DISCORD_APP_NAME
-#define TL_DISCORD_BUTTON_URL "https://pvz.oender.dev"
-/* The app icon by its web address (the website's copy, which follows the
- * repo's icon), so no art has to be uploaded to the Discord application. */
-#define TL_DISCORD_LARGE_IMAGE "https://pvz.oender.dev/icons/reflourished.png"
+#define TL_DISCORD_BUTTON_URL "https://pvz.oender.dev/#reflourished"
+/* The app icon by its web address: the repo's own icon on the default branch,
+ * so Discord shows the current one and no art is uploaded to the application. */
+#define TL_DISCORD_LARGE_IMAGE "https://raw.githubusercontent.com/oenderg/Reflourished-Darwin/HEAD/docs/banner/icon.png"
 
 typedef void (*tl_discord_log_fn)(const char *fmt, ...);
 
