@@ -359,6 +359,11 @@ with a 30-second idle timeout (as Android) and a 60-second total, since start-up
 the loading screen for the reply. The worker queues status, headers and body; `husk-tl-pvz2.c`
 delivers the game's response/data/completion callbacks on its GL thread between frames,
 with the same 16 KiB data chunks as Android. Other hosts still fail immediately.
+Every URL on that host is fetched: the content archive, and on the title screen the news
+list (`/cdn/mc_1.5.0.json`, read by RFLib's `GetAds`) and its banner pictures. Only
+`/cdn/1.5.0.main.tar` has the local copy and fallback below; any other failed request is a plain
+failure. Windows does the same over WinHTTP (`runtime/win/husk-tl-cdn-win.c`, no redirects
+followed). Answering the news list with the archive leaves the title screen without banners.
 
 **The response's `Date` is required even when the archive has not changed.** In 1.4.2,
 `0x15398fc` reads that header, parses RFC 1123 GMT, and records the server timestamp;
