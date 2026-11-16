@@ -4,7 +4,7 @@
  "cdn_url": "https://reflourished.ducnguyen.org/cdn/1.5.0.main.tar",
  "libs_sha256": {
   "libPVZ2.so": "d3ceccfaba3b6949f5778860d011b4f16bffd26db151f5f06b4bef07a68b5d15",
-  "libRFLib.so": "886fb10c7f9399ddd24bfa6376732689212f78f5d75df6de5e44c6bbd5b90d7e",
+  "libRFLib.so": "9e1f1f5cdc2053deb9b3ddb7012105344d42ee853c6b0eed9b0974035032e9cc",
   "libNimble.so": "43586263eaba06b7a4cfb5528bffaefdff2ee8dc21589958d16476a7b92d3ac7",
   "libc++_shared.so": "38815e321b404e8363aba1c0a5a86649eed45ce31007740039dddb780ea1d653"
  },
@@ -15,9 +15,9 @@
   "https://rsb.ducnguyen.org/download/live/1794647945/full"
  ],
  "mod_lib": {
-  "version": "1.5.0-R00",
-  "timestamp": 1794712884,
-  "sha256": "886fb10c7f9399ddd24bfa6376732689212f78f5d75df6de5e44c6bbd5b90d7e",
+  "version": "1.5.0-R01",
+  "timestamp": 1794761931,
+  "sha256": "9e1f1f5cdc2053deb9b3ddb7012105344d42ee853c6b0eed9b0974035032e9cc",
   "apk_sha256": "889b2384fef21fe4caf5cebc54341910e4cc0a1884afbfaba6473ba38782a2db",
   "url": "https://reflourished.ducnguyen.org/libcdn/liblatestrelease.tar",
   "member": "libRFLib64.so"

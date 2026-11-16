@@ -401,6 +401,10 @@ published this way (built 2026-11-14 22:07, SHA-256 `886fb10c...`). Our apps do 
 at run time (the library is converted and signed ahead of time), so `getPrivateDir()` stays
 unimplemented and the game logs `DevLib: could not resolve the private data dir, skipping`. A
 newer library is a new conversion with its own hook table: R00 asks for 453 hooks, one more than
-BASE. A build pins one library (`mod_lib` in `data/game-<version>.json`, put into a copy of the
-APK by `scripts/mod-lib.py`). The link names only the newest file, so a build that wants a given
-one needs its own copy.
+BASE. R01 (built 2026-11-15 11:37, SHA-256 `9e1f1f5c...`) asks for exactly the same 453 sites;
+a converted Mac run with `HUSK_HOOK_TRACE=1` confirmed none were missing. The driver has no
+hard-coded libRFLib addresses to relocate; its game and cursor addresses are in the unchanged
+libPVZ2. R01's read-only strings add `hollows` as well as changing the tag and build time.
+A build pins one library (`mod_lib` in `data/game-<version>.json`, put into a copy of the APK by
+`scripts/mod-lib.py`). The link names only the newest file, so a build that wants a given one
+needs its own copy.
