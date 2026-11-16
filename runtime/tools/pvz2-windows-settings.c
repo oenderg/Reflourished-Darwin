@@ -263,6 +263,8 @@ const char *pvz2_settings_key_owner(const pvz2_settings *s, const char *name)
 #define ID_CHECK_NOW     217
 #define ID_LAST_CHECK    218
 #define ID_DISCORD_PRESENCE 220
+#define ID_DISCORD_GROUP 221
+#define ID_DISCORD_FOOTER 222
 
 #define ID_RESTORE       300
 #define ID_APPLY         301
@@ -608,6 +610,9 @@ static void general_vertical(HWND p, int dw)
     if ((it = item_of(GENERAL, ID_START_FULL))) it->y = bottom + 20;
     if ((it = item_of(GENERAL, ID_CONFIRM_QUIT))) it->y = bottom + 62;
     if ((it = item_of(GENERAL, ID_QUIT_FOOTER))) it->y = bottom + 98;
+    if ((it = item_of(GENERAL, ID_DISCORD_GROUP))) it->y = bottom + 168;
+    if ((it = item_of(GENERAL, ID_DISCORD_PRESENCE))) it->y = bottom + 190;
+    if ((it = item_of(GENERAL, ID_DISCORD_FOOTER))) it->y = bottom + 214;
 }
 
 static void build_general_page(HWND p)
@@ -642,6 +647,14 @@ static void build_general_page(HWND p)
     SendMessageW(confirm, BM_SETCHECK, g_pending.confirm_quit ? BST_CHECKED : BST_UNCHECKED, 0);
     add_ruled(p, L"STATIC", L"Closing the window or pressing Alt+F4 saves and quits. To pause and keep your place instead, minimize. Quitting asks first when this is on.",
               0, 24, 354, 460, 58, ID_QUIT_FOOTER, W_FULL, 220);
+    /* Last on General, as on the Mac; general_vertical places it under the
+     * quit footer. */
+    add_ruled(p, L"BUTTON", L"Discord", BS_GROUPBOX, 10, 424, 500, 82, ID_DISCORD_GROUP, W_FULL, 0);
+    HWND discord = add(p, L"BUTTON", L"Show my activity on Discord", BS_AUTOCHECKBOX,
+                       24, 446, 440, 22, ID_DISCORD_PRESENCE);
+    SendMessageW(discord, BM_SETCHECK, g_pending.discord_presence ? BST_CHECKED : BST_UNCHECKED, 0);
+    add_ruled(p, L"STATIC", L"While the game runs, Discord shows it as your activity with the time since it started and a link to the game's site. Turning this off clears the activity at once; it is on by default. iPhone and iPad send nothing.",
+              0, 24, 470, 460, 32, ID_DISCORD_FOOTER, W_FULL, 220);
     mode_refresh(p);
 }
 
@@ -674,14 +687,7 @@ static void build_about_page(HWND p)
     add(p, L"STATIC", L"Version " L"" PVZ2_APP_VERSION, 0, 24, 50, 460, 20, 0);
     add_ruled(p, L"STATIC", L"Plants vs. Zombies 2: Reflourished, running on Windows: the game's own Android code, drawn through Direct3D 11.",
               0, 24, 80, 460, 42, 0, W_FULL, 220);
-    /* The account-level choice, above the updater and the folders. */
-    add_ruled(p, L"BUTTON", L"Discord", BS_GROUPBOX, 10, 130, 500, 82, 0, W_FULL, 0);
-    HWND discord = add(p, L"BUTTON", L"Show my activity on Discord", BS_AUTOCHECKBOX,
-                       24, 152, 440, 22, ID_DISCORD_PRESENCE);
-    SendMessageW(discord, BM_SETCHECK, g_pending.discord_presence ? BST_CHECKED : BST_UNCHECKED, 0);
-    add_ruled(p, L"STATIC", L"While the game runs, Discord shows it as your activity with the time since it started and a link to the game's site. Turning this off clears the activity and closes the connection at once; it is on by default. iPhone and iPad send nothing.",
-              0, 24, 176, 460, 32, 0, W_FULL, 220);
-    int y = 222;
+    int y = 138;
     if (pvz2_updates_configured()) {
         /* The Mac's Updates section, word for word, with its own last check
          * time; the portable build has no updater, so nothing here. */

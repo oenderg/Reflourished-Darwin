@@ -378,7 +378,7 @@ private struct GeneralPane: View {
             } header: {
                 Text("Discord")
             } footer: {
-                Text("While the game runs, Discord shows it as your activity with the time since it started and a link to the game's site. Turning this off clears the activity and closes the connection at once; it is on by default. The Mac and Windows apps only: iPhone and iPad send nothing.")
+                Text("While the game runs, Discord shows it as your activity with the time since it started and a link to the game's site. Turning this off clears the activity at once; it is on by default. The Mac and Windows apps only: iPhone and iPad send nothing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
