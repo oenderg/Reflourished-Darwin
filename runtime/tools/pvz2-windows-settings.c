@@ -50,6 +50,7 @@ void pvz2_settings_defaults(pvz2_settings *s)
     s->show_cursor_plant = 1;
     s->cursor_cross_brightness = 45;
     s->automatic_updates = 1;
+    s->discord_presence = 1;
 }
 
 /* A value that is missing from the file is the default; a value that is there
@@ -101,6 +102,7 @@ void pvz2_settings_load(const char *path, pvz2_settings *s)
     s->show_level_keys = ini_int(path, "keys", "showLevelKeys", d.show_level_keys);
     s->plant_on_press = ini_int(path, "keys", "plantOnPress", d.plant_on_press) == 1;
     s->automatic_updates = ini_int(path, "updates", "automaticChecks", d.automatic_updates) != 0;
+    s->discord_presence = ini_int(path, "discord", "enabled", d.discord_presence) != 0;
     s->show_cursor_plant = ini_int(path, "pointer", "showCursorPlant", d.show_cursor_plant) != 0;
     s->cursor_cross_brightness = ini_int(path, "pointer", "crossBrightness", d.cursor_cross_brightness);
     if (s->cursor_cross_brightness < 0) s->cursor_cross_brightness = 0;
@@ -132,6 +134,7 @@ int pvz2_settings_save(const char *path, const pvz2_settings *s)
     WritePrivateProfileStringA("keys", "showLevelKeys", s->show_level_keys ? "1" : "0", path);
     WritePrivateProfileStringA("keys", "plantOnPress", s->plant_on_press ? "1" : "0", path);
     WritePrivateProfileStringA("updates", "automaticChecks", s->automatic_updates ? "1" : "0", path);
+    WritePrivateProfileStringA("discord", "enabled", s->discord_presence ? "1" : "0", path);
     WritePrivateProfileStringA("pointer", "showCursorPlant", s->show_cursor_plant ? "1" : "0", path);
     {
         char pct[16];
@@ -259,6 +262,7 @@ const char *pvz2_settings_key_owner(const pvz2_settings *s, const char *name)
 #define ID_AUTOMATIC_UPDATES 216
 #define ID_CHECK_NOW     217
 #define ID_LAST_CHECK    218
+#define ID_DISCORD_PRESENCE 220
 
 #define ID_RESTORE       300
 #define ID_APPLY         301
@@ -670,19 +674,26 @@ static void build_about_page(HWND p)
     add(p, L"STATIC", L"Version " L"" PVZ2_APP_VERSION, 0, 24, 50, 460, 20, 0);
     add_ruled(p, L"STATIC", L"Plants vs. Zombies 2: Reflourished, running on Windows: the game's own Android code, drawn through Direct3D 11.",
               0, 24, 80, 460, 42, 0, W_FULL, 220);
-    int y = 138;
+    /* The account-level choice, above the updater and the folders. */
+    add_ruled(p, L"BUTTON", L"Discord", BS_GROUPBOX, 10, 130, 500, 82, 0, W_FULL, 0);
+    HWND discord = add(p, L"BUTTON", L"Show my activity on Discord", BS_AUTOCHECKBOX,
+                       24, 152, 440, 22, ID_DISCORD_PRESENCE);
+    SendMessageW(discord, BM_SETCHECK, g_pending.discord_presence ? BST_CHECKED : BST_UNCHECKED, 0);
+    add_ruled(p, L"STATIC", L"While the game runs, Discord shows it as your activity with the time since it started and a link to the game's site. Turning this off clears the activity and closes the connection at once; it is on by default. iPhone and iPad send nothing.",
+              0, 24, 176, 460, 32, 0, W_FULL, 220);
+    int y = 222;
     if (pvz2_updates_configured()) {
         /* The Mac's Updates section, word for word, with its own last check
          * time; the portable build has no updater, so nothing here. */
-        add_ruled(p, L"BUTTON", L"Updates", BS_GROUPBOX, 10, 132, 500, 120, 0, W_FULL, 0);
+        add_ruled(p, L"BUTTON", L"Updates", BS_GROUPBOX, 10, y, 500, 120, 0, W_FULL, 0);
         HWND auto_check = add(p, L"BUTTON", L"Check for updates automatically", BS_AUTOCHECKBOX,
-                              24, 156, 440, 22, ID_AUTOMATIC_UPDATES);
+                              24, y + 24, 440, 22, ID_AUTOMATIC_UPDATES);
         SendMessageW(auto_check, BM_SETCHECK, g_pending.automatic_updates ? BST_CHECKED : BST_UNCHECKED, 0);
-        add_ruled(p, L"STATIC", L"", 0, 24, 184, 340, 20, ID_LAST_CHECK, W_FULL, 0);
-        add_ruled(p, L"BUTTON", L"Check Now", BS_PUSHBUTTON, 382, 180, 112, 26, ID_CHECK_NOW, A_RIGHT, 0);
+        add_ruled(p, L"STATIC", L"", 0, 24, y + 52, 340, 20, ID_LAST_CHECK, W_FULL, 0);
+        add_ruled(p, L"BUTTON", L"Check Now", BS_PUSHBUTTON, 382, y + 48, 112, 26, ID_CHECK_NOW, A_RIGHT, 0);
         add_ruled(p, L"STATIC", L"Once a day the app looks for a new release on GitHub, and asks before it installs one. Your saves and settings stay as they are.",
-                  0, 24, 212, 460, 34, 0, W_FULL, 220);
-        y = 262;
+                  0, 24, y + 80, 460, 34, 0, W_FULL, 220);
+        y += 130;
     }
     /* The paths take the extra width (they end in an ellipsis when they must);
      * the buttons stay at the right. */
@@ -945,6 +956,9 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case ID_AUTOMATIC_UPDATES:
             g_pending.automatic_updates = (int)SendMessageW((HWND)lp, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            return 0;
+        case ID_DISCORD_PRESENCE:
+            g_pending.discord_presence = (int)SendMessageW((HWND)lp, BM_GETCHECK, 0, 0) == BST_CHECKED;
             return 0;
         case ID_CHECK_NOW:
             /* WinSparkle's own window reports through the callbacks; the page

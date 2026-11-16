@@ -32,6 +32,7 @@ typedef struct {
     int show_cursor_plant; /* 1: draw the selected plant and its cross at the pointer */
     int cursor_cross_brightness; /* 0..100, percent of white for the cross bands */
     int automatic_updates; /* 1: the installed build checks for updates once a day */
+    int discord_presence; /* 1: show the game as the player's activity on Discord */
 } pvz2_settings;
 
 typedef struct {

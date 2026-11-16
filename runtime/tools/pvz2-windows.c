@@ -45,6 +45,7 @@
 #include "husk-tl-pvz2.h"
 #include "husk-tl-xmem.h"
 #include "pvz2-cursor-images.h"
+#include "pvz2-discord.h"
 #include "pvz2-keys.h"
 #include "pvz2-windows-settings.h"
 #include "pvz2-windows-darkmode.h"
@@ -622,6 +623,7 @@ static void settings_applied(void *user, const pvz2_settings *s)
     g_settings = *s;
     g_show_keys = s->show_level_keys;
     tl_pvz2_set_plant_on_press(s->plant_on_press);
+    tl_discord_set_enabled(s->discord_presence);
     g_show_cursor_plant = s->show_cursor_plant;
     g_cross_brightness = s->cursor_cross_brightness;
     pvz2_updates_set_automatic(s->automatic_updates);
@@ -727,6 +729,37 @@ static void parse_start_args(int *action, char *data, size_t n)
         }
     }
     LocalFree(argv);
+}
+
+/* A test can point Rich Presence at its own Discord application without
+ * changing the constant in pvz2-discord.h: a launch argument, or the same
+ * environment variable the Mac host reads. */
+static const char *discord_app_id_override(char *buf, size_t n)
+{
+    const char *env = getenv("TL_DISCORD_APP_ID");
+    if (env && *env) { snprintf(buf, n, "%s", env); return buf; }
+    int argc = 0;
+    LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return "";
+    const wchar_t *prefix = L"--discord-app-id=";
+    size_t plen = wcslen(prefix);
+    for (int i = 1; i < argc; i++) {
+        if (!wcsncmp(argv[i], prefix, plen)) {
+            WideCharToMultiByte(CP_ACP, 0, argv[i] + plen, -1, buf, (int)n, NULL, NULL);
+            LocalFree(argv);
+            return buf;
+        }
+    }
+    LocalFree(argv);
+    return "";
+}
+
+static unsigned long long unix_ms_now(void)
+{
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    unsigned long long ticks = ((unsigned long long)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    return ticks / 10000 - 11644473600000ULL;
 }
 
 /* FNV-1a of the lowercased absolute data folder. The mutex is Local, so two
@@ -4016,6 +4049,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
     g_show_keys = g_settings.show_level_keys;
     g_show_cursor_plant = g_settings.show_cursor_plant;
     g_cross_brightness = g_settings.cursor_cross_brightness;
+    /* The presence worker owns its socket and its own thread: the game's
+     * thread never sees a connect, a read or a write. */
+    {
+        char id[32];
+        tl_discord_start(unix_ms_now(), discord_app_id_override(id, sizeof(id)),
+                         g_settings.discord_presence, tl_log_line);
+    }
 
     snprintf(g_apk, sizeof(g_apk), "%s", env_or("TL_PVZ2_APK", "")); 
     if (!g_apk[0]) { char p[MAX_PATH + 32]; join(p, sizeof(p), g_exe_dir, "Game/pvz2.apk"); snprintf(g_apk, sizeof(g_apk), "%s", p); }
@@ -4155,6 +4195,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
         DispatchMessageW(&m);
     }
     tl_log_line("windows: the window is closed");
+    tl_discord_stop();
     g_pointer_timer_wanted = 0;
     pointer_timer_stop();
     pvz2_updates_shutdown();

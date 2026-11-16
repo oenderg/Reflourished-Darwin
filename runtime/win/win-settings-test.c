@@ -22,6 +22,7 @@ int main(void)
     CHECK(s.confirm_quit);
     CHECK(s.show_level_keys && s.show_cursor_plant && s.cursor_cross_brightness == 45);
     CHECK(s.automatic_updates);
+    CHECK(s.discord_presence);
     CHECK(!s.plant_on_press);
     WritePrivateProfileStringA("window", "adaptShape", "1", path);
     WritePrivateProfileStringA("window", "keepSizeAndPlace", "0", path);
@@ -33,10 +34,12 @@ int main(void)
     WritePrivateProfileStringA("pointer", "showCursorPlant", "0", path);
     WritePrivateProfileStringA("pointer", "crossBrightness", "71", path);
     WritePrivateProfileStringA("updates", "automaticChecks", "0", path);
+    WritePrivateProfileStringA("discord", "enabled", "0", path);
     pvz2_settings_load(path, &s);
     CHECK(s.adapt_shape && !strcmp(s.slot[0], "J") && !*s.shovel);
     CHECK(!strcmp(s.collect_sun, "F9") && !s.show_level_keys && !s.show_cursor_plant && s.cursor_cross_brightness == 71);
     CHECK(!s.automatic_updates);
+    CHECK(!s.discord_presence);
     CHECK(s.plant_on_press);
     s.automatic_updates = 1;
     s.adapt_shape = 0;
