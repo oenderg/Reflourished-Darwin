@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build PvZ2: Reflourished for iPhone, iPad and Mac from the Android release.
 #
-#   ./build.sh --apk <file|url> [--obb <file|url>] [--cdn <file|url>] [--mod-lib <file>] [--ios] [--ios-sim] [--mac] [--slim] [--quick] [--reuse-converted] [--out dir]
+#   ./build.sh --apk <file|url> [--obb <file|url>] [--cdn <file|url>] [--mod-lib <file>] [--ios] [--ios-sim] [--mac] [--slim] [--quick] [--reuse-converted] [--plant-roster <json>] [--out dir]
 #
 # Without --ios, --ios-sim or --mac, iOS and Mac are built. --apk and --obb take a file, or a link
 # (direct, Google Drive or MEGA) that is downloaded first; without --obb the OBB
@@ -14,6 +14,8 @@
 # --reuse-converted reuses the converted code but still makes the disk image (release variants).
 # scripts/package-release.sh gives the IPA and DMG their versioned release names.
 # APP_BUILD overrides the build number (default: major*10000 + minor*100 + patch).
+# --plant-roster <json> applies a personal plant visibility roster to a full build
+# (requires zstd). The original OBB is kept; slim downloads do not carry the roster.
 # The results land in out/ (or --out):
 #
 #   PvZ2-Reflourished.ipa          for iPhone and iPad (sign it with your sideloader)
@@ -28,6 +30,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 . "$ROOT/scripts/app-version.sh"
 OUT="$ROOT/out"
 APK="" OBB="" CDN="" WANT_IOS=0 WANT_IOS_SIM=0 WANT_MAC=0 SLIM=0 QUICK=0 REUSE_CONVERTED=0
+PLANT_ROSTER=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -39,6 +42,7 @@ while [ $# -gt 0 ]; do
         --ios-sim) WANT_IOS_SIM=1; shift ;;
         --mac) WANT_MAC=1; shift ;;
         --mod-lib) MOD_LIB="$2"; shift 2 ;;
+        --plant-roster) PLANT_ROSTER="$2"; shift 2 ;;
         --slim) SLIM=1; shift ;;
         --quick) QUICK=1; shift ;;
         --reuse-converted) REUSE_CONVERTED=1; shift ;;
@@ -48,6 +52,10 @@ while [ $# -gt 0 ]; do
 done
 [ "$WANT_IOS$WANT_IOS_SIM$WANT_MAC" = 000 ] && WANT_IOS=1 WANT_MAC=1
 [ -n "$APK" ] || { echo "--apk is required (see ./build.sh --help)" >&2; exit 2; }
+if [ -n "$PLANT_ROSTER" ] && [ "$SLIM" = 1 ]; then
+    echo "--plant-roster requires a full build; a slim app downloads the original OBB" >&2
+    exit 2
+fi
 
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
@@ -117,6 +125,15 @@ OBB_URLS="$(python3 -c "import json,sys; print(' '.join(json.load(open(sys.argv[
 OBB_SHA256="$(json 'd["obb_sha256"]')"
 OBB_SIZE="$(json 'd["obb_size"]')"
 OBB_NAME="$(json 'd["obb_name"]')"
+if [ -n "$PLANT_ROSTER" ]; then
+    step "applying the personal plant roster"
+    python3 "$ROOT/scripts/plant-roster.py" "$OBB" "$WORK/plant-roster.obb" --roster "$PLANT_ROSTER"
+    OBB="$WORK/plant-roster.obb"
+    OBB_SHA256="$(shasum -a 256 "$OBB" | cut -d' ' -f1)"
+    OBB_SIZE="$(stat -f %z "$OBB")"
+    # An unmodified remote download cannot restore this personalized data file.
+    OBB_URLS=""
+fi
 
 # ---------------------------------------------------------------- iPhone and iPad
 if [ "$WANT_IOS" = 1 ] || [ "$WANT_IOS_SIM" = 1 ]; then

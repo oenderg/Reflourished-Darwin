@@ -99,9 +99,31 @@ static char g_apk[1024], g_data[1024], g_egl[1024], g_gles[1024];
 - (void)cursorSettingChanged;
 - (void)badgeTick:(NSTimer *)timer;
 - (void)refreshBadges:(BOOL)force;
+- (void)updateGameCursor;
+- (void)scrollAt:(NSPoint)p deltaX:(double)dx deltaY:(double)dy phased:(BOOL)phased began:(BOOL)began ended:(BOOL)ended;
 @end
 static PVZ2View *g_view;
 static NSWindow *g_window;
+static unsigned g_mouse_buttons_down;
+static BOOL g_scroll_active;
+static double g_scroll_start_gx, g_scroll_start_gy;
+static double g_scroll_cur_gx, g_scroll_cur_gy;
+static double g_scroll_accum_dx, g_scroll_accum_dy;
+static NSTimer *g_scroll_wheel_timer;
+
+static void cancel_scroll(void)
+{
+    if (g_scroll_wheel_timer) {
+        [g_scroll_wheel_timer invalidate];
+        g_scroll_wheel_timer = nil;
+    }
+    if (g_scroll_active) {
+        tl_pvz2_touch(3, 1, (float)g_scroll_cur_gx, (float)g_scroll_cur_gy);
+        g_scroll_active = NO;
+    }
+    g_scroll_accum_dx = 0;
+    g_scroll_accum_dy = 0;
+}
 
 void tl_log_line(const char *fmt, ...);
 
@@ -833,6 +855,7 @@ static int away_count(void)
 
 static void app_suspended(const char *why)
 {
+    cancel_scroll();
     tl_log_line("macos: %s -- the game pauses", why);
     /* The guest is told once, when the first reason comes: a second reason
      * (a minimized window while the app is hidden) is not a second "going
@@ -2020,8 +2043,136 @@ static NSPoint g_cursor_event_point;
 static unsigned int g_cursor_drawn_generation;
 static NSDictionary<NSString *, id> *g_cursor_art;
 static bool g_cursor_art_loading;
+static NSCache<NSString *, PVZ2CursorPose *> *g_cursor_poses;
+static NSMutableSet<NSString *> *g_cursor_pose_pending;
+static dispatch_queue_t g_cursor_art_queue;
+static NSString *g_cursor_art_path;
+static PVZ2CursorPose *g_cursor_pose;
 static void cursor_preview_tick(void);
 static void cursor_load_art(void);
+
+static NSCursor *g_game_cursor;
+static double g_game_cursor_h;
+
+static NSImage *create_pvz2_cursor_image(double width, double height, NSPoint *out_hotspot)
+{
+    if (width < 16.0) width = 16.0;
+    if (height < 20.0) height = 20.0;
+
+    double tx = width * 0.09;
+    double ty = height * 0.07;
+    NSPoint hotSpot = NSMakePoint(tx, ty);
+    if (out_hotspot) *out_hotspot = hotSpot;
+
+    NSSize imageSize = NSMakeSize(width, height);
+    NSImage *image = [NSImage imageWithSize:imageSize flipped:YES drawingHandler:^BOOL(NSRect dstRect) {
+        CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
+        if (!ctx) return NO;
+
+        CGContextSaveGState(ctx);
+
+        double w = dstRect.size.width;
+        double h = dstRect.size.height;
+
+        /* Soft drop shadow for tactile depth and separation from backgrounds */
+        CGContextSaveGState(ctx);
+        CGContextSetShadowWithColor(ctx, CGSizeMake(fmax(1.0, w * 0.04), fmax(1.5, h * 0.05)), fmax(2.0, w * 0.08),
+            [NSColor colorWithCalibratedWhite:0.0 alpha:0.35].CGColor);
+
+        /* Main pointer outline path with rounded corners and organic curves */
+        NSBezierPath *path = [NSBezierPath bezierPath];
+
+        NSPoint p_tip        = NSMakePoint(w * 0.09, h * 0.07);
+        NSPoint p_head_left  = NSMakePoint(w * 0.09, h * 0.72);
+        NSPoint p_crotch_l   = NSMakePoint(w * 0.38, h * 0.52);
+        NSPoint p_tail_l     = NSMakePoint(w * 0.60, h * 0.90);
+        NSPoint p_tail_r     = NSMakePoint(w * 0.76, h * 0.82);
+        NSPoint p_crotch_r   = NSMakePoint(w * 0.54, h * 0.52);
+        NSPoint p_right_barb = NSMakePoint(w * 0.82, h * 0.52);
+
+        /* Start near apex tip on left edge */
+        [path moveToPoint:NSMakePoint(p_tip.x, p_tip.y + h * 0.04)];
+
+        /* Rounded apex tip */
+        [path curveToPoint:NSMakePoint(p_tip.x + w * 0.05, p_tip.y)
+             controlPoint1:NSMakePoint(p_tip.x, p_tip.y - h * 0.015)
+             controlPoint2:NSMakePoint(p_tip.x + w * 0.02, p_tip.y - h * 0.015)];
+
+        /* Top-right edge from tip to right barb (gentle organic outward swell) */
+        [path curveToPoint:NSMakePoint(p_right_barb.x - w * 0.03, p_right_barb.y - h * 0.03)
+             controlPoint1:NSMakePoint(w * 0.38, h * 0.20)
+             controlPoint2:NSMakePoint(w * 0.66, h * 0.36)];
+
+        /* Rounded right barb */
+        [path curveToPoint:NSMakePoint(p_right_barb.x - w * 0.04, p_right_barb.y + h * 0.02)
+             controlPoint1:NSMakePoint(p_right_barb.x + w * 0.02, p_right_barb.y)
+             controlPoint2:NSMakePoint(p_right_barb.x + w * 0.01, p_right_barb.y + h * 0.02)];
+
+        /* Cut inward to right crotch */
+        [path curveToPoint:NSMakePoint(p_crotch_r.x + w * 0.02, p_crotch_r.y)
+             controlPoint1:NSMakePoint(w * 0.70, h * 0.53)
+             controlPoint2:NSMakePoint(w * 0.60, h * 0.52)];
+
+        /* Stem right edge down to tail */
+        [path curveToPoint:NSMakePoint(p_tail_r.x - w * 0.01, p_tail_r.y - h * 0.02)
+             controlPoint1:NSMakePoint(w * 0.60, h * 0.62)
+             controlPoint2:NSMakePoint(w * 0.70, h * 0.72)];
+
+        /* Rounded tail base */
+        [path curveToPoint:NSMakePoint(p_tail_l.x + w * 0.02, p_tail_l.y)
+             controlPoint1:NSMakePoint(p_tail_r.x + w * 0.02, p_tail_r.y + h * 0.035)
+             controlPoint2:NSMakePoint(p_tail_l.x + w * 0.05, p_tail_l.y + h * 0.035)];
+
+        /* Stem left edge up to left crotch */
+        [path curveToPoint:NSMakePoint(p_crotch_l.x + w * 0.01, p_crotch_l.y + h * 0.02)
+             controlPoint1:NSMakePoint(w * 0.52, h * 0.78)
+             controlPoint2:NSMakePoint(w * 0.42, h * 0.64)];
+
+        /* Cut down-left from crotch to left head bottom */
+        [path curveToPoint:NSMakePoint(p_head_left.x + w * 0.04, p_head_left.y - h * 0.01)
+             controlPoint1:NSMakePoint(w * 0.28, h * 0.58)
+             controlPoint2:NSMakePoint(w * 0.18, h * 0.66)];
+
+        /* Rounded left corner */
+        [path curveToPoint:NSMakePoint(p_head_left.x, p_head_left.y - h * 0.04)
+             controlPoint1:NSMakePoint(p_head_left.x - w * 0.02, p_head_left.y)
+             controlPoint2:NSMakePoint(p_head_left.x - w * 0.02, p_head_left.y - h * 0.02)];
+
+        /* Left edge back up to tip (gentle organic curve) */
+        [path curveToPoint:NSMakePoint(p_tip.x, p_tip.y + h * 0.04)
+             controlPoint1:NSMakePoint(w * 0.07, h * 0.50)
+             controlPoint2:NSMakePoint(w * 0.07, h * 0.25)];
+
+        [path closePath];
+
+        /* Outer outline with shadow */
+        NSColor *blackBorder = [NSColor colorWithCalibratedWhite:0.0 alpha:1.0];
+        [blackBorder setStroke];
+        path.lineWidth = fmax(2.0, w * 0.08);
+        path.lineJoinStyle = NSLineJoinStyleRound;
+        path.lineCapStyle = NSLineCapStyleRound;
+        [path stroke];
+        CGContextRestoreGState(ctx);
+
+        /* Fill body with pure white */
+        CGContextSaveGState(ctx);
+        [[NSColor colorWithCalibratedWhite:1.0 alpha:1.0] setFill];
+        [path fill];
+        CGContextRestoreGState(ctx);
+
+        /* Crisp outer black stroke without shadow */
+        [blackBorder setStroke];
+        path.lineWidth = fmax(1.8, w * 0.07);
+        path.lineJoinStyle = NSLineJoinStyleRound;
+        path.lineCapStyle = NSLineCapStyleRound;
+        [path stroke];
+
+        CGContextRestoreGState(ctx);
+        return YES;
+    }];
+
+    return image;
+}
 
 static NSString *badge_key_text(NSString *key)
 {
@@ -2167,14 +2318,58 @@ static double host_now(void)
 @implementation PVZ2View
 - (BOOL)isFlipped { return YES; }
 
+- (void)resetCursorRects
+{
+    [super resetCursorRects];
+    if (g_game_cursor) [self addCursorRect:self.bounds cursor:g_game_cursor];
+}
+
+- (void)cursorUpdate:(NSEvent *)event
+{
+    (void)event;
+    if (g_game_cursor) [g_game_cursor set];
+}
+
 - (void)updateTrackingAreas
 {
     if (self.cursorTracking) [self removeTrackingArea:self.cursorTracking];
     self.cursorTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
-        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingCursorUpdate | NSTrackingActiveAlways | NSTrackingInVisibleRect
         owner:self userInfo:nil];
     [self addTrackingArea:self.cursorTracking];
     [super updateTrackingAreas];
+}
+
+- (void)updateGameCursor
+{
+    NSRect b = self.bounds;
+    if (b.size.width <= 0 || b.size.height <= 0) return;
+
+    double vx = 0, vy = 0, vw = 0, vh = 0;
+    int sw = atomic_load(&g_surface_w), sh = atomic_load(&g_surface_h);
+    double ref_h = b.size.height;
+    if (tl_viewport_fit(b.size.width, b.size.height, sw > 0 ? sw : g_layout_w, sh > 0 ? sh : g_layout_h, &vx, &vy, &vw, &vh) && vh > 0.0) {
+        ref_h = vh;
+    }
+
+    double target_h = round(ref_h * 0.078);
+    if (target_h < 24.0) target_h = 24.0;
+    if (target_h > 96.0) target_h = 96.0;
+    double target_w = round(target_h * 0.75);
+
+    if (g_game_cursor && fabs(g_game_cursor_h - target_h) < 0.5) return;
+
+    NSPoint hotSpot = NSZeroPoint;
+    NSImage *img = create_pvz2_cursor_image(target_w, target_h, &hotSpot);
+    if (!img) return;
+
+    g_game_cursor = [[NSCursor alloc] initWithImage:img hotSpot:hotSpot];
+    g_game_cursor_h = target_h;
+
+    [self.window invalidateCursorRectsForView:self];
+    if (g_cursor_event_inside) {
+        [g_game_cursor set];
+    }
 }
 
 - (void)mouseMoved:(NSEvent *)event
@@ -2182,10 +2377,14 @@ static double host_now(void)
     g_cursor_event_point = [self convertPoint:event.locationInWindow fromView:nil];
     g_cursor_event_known = true;
     g_cursor_event_inside = NSPointInRect(g_cursor_event_point, self.bounds);
+    if (g_cursor_event_inside && g_game_cursor && [NSCursor currentCursor] != g_game_cursor) {
+        [g_game_cursor set];
+    }
 }
 
 - (void)mouseEntered:(NSEvent *)event
 {
+    if (g_game_cursor) [g_game_cursor set];
     [self mouseMoved:event];
 }
 
@@ -2194,6 +2393,7 @@ static double host_now(void)
     (void)event;
     g_cursor_event_known = true;
     g_cursor_event_inside = false;
+    [[NSCursor arrowCursor] set];
 }
 
 - (void)cursorSettingChanged
@@ -2255,6 +2455,8 @@ static double host_now(void)
  */
 - (void)applyPresentation
 {
+    static NSSize last_size;
+    if (!NSEqualSizes(last_size, self.bounds.size)) { cancel_scroll(); last_size = self.bounds.size; }
     g_cursor_event_known = false;
     NSRect b = self.bounds;
     double scale = self.metal.contentsScale;
@@ -2282,6 +2484,7 @@ static double host_now(void)
     /* The same bounds, so the badges use the fit that was just applied: during
      * a live drag the game is only scaled, and this is the scale it got. */
     [self refreshBadges:YES];
+    [self updateGameCursor];
 }
 
 /* The setting, the labels and the driver's switch, together. Called at start
@@ -2552,15 +2755,133 @@ static NSButton *round_button(NSString *symbol, NSString *tip, SEL action, NSVie
     tl_pvz2_touch(phase, 1, gx, gy);
 }
 - (void)mouseDown:(NSEvent *)event {
+    cancel_scroll();
+    if (g_game_cursor) [g_game_cursor set];
+    g_mouse_buttons_down |= 1;
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     tl_log_line("macos: the mouse pressed at (%.0f,%.0f) in the window", p.x, p.y);
     [self touch:0 event:event];
 }
 - (void)mouseDragged:(NSEvent *)event { [self mouseMoved:event]; [self touch:1 event:event]; }
-- (void)mouseUp:(NSEvent *)event { [self touch:3 event:event]; }
-- (void)rightMouseDown:(NSEvent *)event { [self touch:0 event:event]; }
+- (void)mouseUp:(NSEvent *)event { g_mouse_buttons_down &= ~1u; [self touch:3 event:event]; }
+- (void)rightMouseDown:(NSEvent *)event {
+    cancel_scroll();
+    if (g_game_cursor) [g_game_cursor set];
+    g_mouse_buttons_down |= 2;
+    [self touch:0 event:event];
+}
 - (void)rightMouseDragged:(NSEvent *)event { [self mouseMoved:event]; [self touch:1 event:event]; }
-- (void)rightMouseUp:(NSEvent *)event { [self touch:3 event:event]; }
+- (void)rightMouseUp:(NSEvent *)event { g_mouse_buttons_down &= ~2u; [self touch:3 event:event]; }
+
+- (void)scrollWheel:(NSEvent *)event
+{
+    if (event.phase & NSEventPhaseCancelled) { cancel_scroll(); return; }
+    if (event.momentumPhase != NSEventPhaseNone) return;
+
+    double units = event.hasPreciseScrollingDeltas ? 1.0 : 18.0;
+    BOOL phased = (event.phase != NSEventPhaseNone);
+    BOOL began = ((event.phase & NSEventPhaseBegan) != 0);
+    BOOL ended = ((event.phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) != 0);
+
+    [self scrollAt:[self convertPoint:event.locationInWindow fromView:nil]
+            deltaX:event.scrollingDeltaX * units
+            deltaY:event.scrollingDeltaY * units
+            phased:phased
+             began:began
+             ended:ended];
+}
+
+- (void)scrollAt:(NSPoint)p deltaX:(double)dx deltaY:(double)dy phased:(BOOL)phased began:(BOOL)began ended:(BOOL)ended
+{
+    if (!atomic_load(&ready) || !tl_pvz2_started() || atomic_load(&g_packet_in_hand) ||
+        tl_pvz2_keyboard_showing() || g_mouse_buttons_down || self.window.attachedSheet) {
+        cancel_scroll();
+        return;
+    }
+
+    double vx, vy, vw, vh, gx, gy;
+    int sw = atomic_load(&g_surface_w), sh = atomic_load(&g_surface_h);
+    if (!tl_viewport_fit(self.bounds.size.width, self.bounds.size.height, sw, sh, &vx, &vy, &vw, &vh) ||
+        !tl_viewport_map(p.x, p.y, vx, vy, vw, vh, sw, sh, &gx, &gy)) {
+        if (ended) cancel_scroll();
+        return;
+    }
+
+    double scale_x = (double)sw / vw;
+    double scale_y = (double)sh / vh;
+
+    if (phased) {
+        /* Phased trackpad swipe */
+        if (began) {
+            cancel_scroll();
+            g_scroll_start_gx = gx;
+            g_scroll_start_gy = gy;
+            g_scroll_cur_gx = gx;
+            g_scroll_cur_gy = gy;
+            g_scroll_accum_dx = 0;
+            g_scroll_accum_dy = 0;
+            g_scroll_active = NO;
+        }
+
+        if (ended) {
+            cancel_scroll();
+            return;
+        }
+
+        if (!g_scroll_active && g_scroll_accum_dx == 0 && g_scroll_accum_dy == 0) {
+            g_scroll_start_gx = gx;
+            g_scroll_start_gy = gy;
+            g_scroll_cur_gx = gx;
+            g_scroll_cur_gy = gy;
+        }
+
+        g_scroll_accum_dx += dx;
+        g_scroll_accum_dy += dy;
+
+        double dist = hypot(g_scroll_accum_dx, g_scroll_accum_dy);
+        if (!g_scroll_active) {
+            if (dist >= 3.0) {
+                g_scroll_active = YES;
+                tl_pvz2_touch(0, 1, (float)g_scroll_start_gx, (float)g_scroll_start_gy);
+                g_scroll_cur_gx = g_scroll_start_gx + g_scroll_accum_dx * scale_x;
+                g_scroll_cur_gy = g_scroll_start_gy + g_scroll_accum_dy * scale_y;
+                tl_pvz2_touch(1, 1, (float)g_scroll_cur_gx, (float)g_scroll_cur_gy);
+            }
+        } else {
+            g_scroll_cur_gx = g_scroll_start_gx + g_scroll_accum_dx * scale_x;
+            g_scroll_cur_gy = g_scroll_start_gy + g_scroll_accum_dy * scale_y;
+            tl_pvz2_touch(1, 1, (float)g_scroll_cur_gx, (float)g_scroll_cur_gy);
+        }
+    } else {
+        /* Traditional discrete mouse wheel */
+        if (g_scroll_wheel_timer) {
+            [g_scroll_wheel_timer invalidate];
+            g_scroll_wheel_timer = nil;
+        }
+
+        if (!g_scroll_active) {
+            g_scroll_start_gx = gx;
+            g_scroll_start_gy = gy;
+            g_scroll_cur_gx = gx;
+            g_scroll_cur_gy = gy;
+            g_scroll_active = YES;
+            tl_pvz2_touch(0, 1, (float)gx, (float)gy);
+        }
+
+        g_scroll_cur_gx += dx * scale_x;
+        g_scroll_cur_gy += dy * scale_y;
+        tl_pvz2_touch(1, 1, (float)g_scroll_cur_gx, (float)g_scroll_cur_gy);
+
+        g_scroll_wheel_timer = [NSTimer scheduledTimerWithTimeInterval:0.08 repeats:NO block:^(NSTimer *timer) {
+            (void)timer;
+            if (g_scroll_active) {
+                tl_pvz2_touch(3, 1, (float)g_scroll_cur_gx, (float)g_scroll_cur_gy);
+                g_scroll_active = NO;
+            }
+            g_scroll_wheel_timer = nil;
+        }];
+    }
+}
 
 /* The guest asks for a keyboard when the player taps the name field
  * (Device_ShowKeyboard). On a Mac the keyboard is already there, so all that is
@@ -2713,8 +3034,15 @@ static void cursor_load_art(void)
     NSString *path = [obb_dir() stringByAppendingPathComponent:name];
     if (![NSFileManager.defaultManager fileExistsAtPath:path])
         path = [bundle_dir(@"Game/obb") stringByAppendingPathComponent:name];
+    if (!g_cursor_art_queue) {
+        g_cursor_art_queue = dispatch_queue_create("pvz2.cursor-art", DISPATCH_QUEUE_SERIAL);
+        g_cursor_poses = [NSCache new];
+        g_cursor_poses.totalCostLimit = 24 * 1024 * 1024;
+        g_cursor_pose_pending = [NSMutableSet set];
+    }
+    g_cursor_art_path = path;
     double start = host_now();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(g_cursor_art_queue, ^{
         @autoreleasepool {
             NSDictionary *art = pvz2_cursor_art(path) ?: @{};
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -2728,6 +3056,32 @@ static void cursor_load_art(void)
             });
         }
     });
+}
+
+static PVZ2CursorPose *cursor_plant_pose(NSString *plant)
+{
+    PVZ2CursorPose *pose = [g_cursor_poses objectForKey:plant];
+    if (pose || !g_cursor_art_path || [g_cursor_pose_pending containsObject:plant]) return pose;
+    [g_cursor_pose_pending addObject:plant];
+    NSString *path = g_cursor_art_path;
+    double start = host_now();
+    dispatch_async(g_cursor_art_queue, ^{
+        @autoreleasepool {
+            PVZ2CursorPose *loaded = pvz2_cursor_plant_art(path, plant);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (loaded) {
+                    CGImageRef image = (__bridge CGImageRef)loaded.image;
+                    [g_cursor_poses setObject:loaded forKey:plant cost:CGImageGetBytesPerRow(image) * CGImageGetHeight(image)];
+                }
+                /* Keep failures recorded so a damaged asset is not retried every tick. */
+                if (loaded) [g_cursor_pose_pending removeObject:plant];
+                g_cursor_drawn_generation = 0;
+                tl_log_line("macos: complete cursor pose %s: %s, %.1f ms", plant.UTF8String,
+                            loaded ? "loaded" : "unavailable", (host_now() - start) * 1000);
+            });
+        }
+    });
+    return nil;
 }
 
 static void cursor_preview_tick(void)
@@ -2758,11 +3112,10 @@ static void cursor_preview_tick(void)
         g_cursor_drawn_generation = s.generation;
         g_cursor_layer.contents = nil;
         g_cursor_layer.hidden = YES;
-        NSString *key = s.kind == TL_PVZ2_CURSOR_PLANT
-            ? [@"IMAGE_UI_PACKETS_" stringByAppendingString:[@(s.plant) uppercaseString]]
-            : s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
+        g_cursor_pose = s.kind == TL_PVZ2_CURSOR_PLANT ? cursor_plant_pose(@(s.plant)) : nil;
+        NSString *key = s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
             : s.kind == TL_PVZ2_CURSOR_PLANT_FOOD ? @"IMAGE_UI_HUD_INGAME_PLANTFOOD_BUTTON" : nil;
-        g_cursor_layer.contents = key ? g_cursor_art[key] : nil;
+        g_cursor_layer.contents = g_cursor_pose ? g_cursor_pose.image : key ? g_cursor_art[key] : nil;
     }
     bool visible = s.live && s.kind != TL_PVZ2_CURSOR_NONE && inside && g_cursor_layer.contents;
     bool cross = false, keep_band = false;
@@ -2855,12 +3208,22 @@ static void cursor_preview_tick(void)
     }
     if (visible && s.surface_w > 0 && s.surface_h > 0) {
         CGSize size = g_view.metal.bounds.size;
-        /* The packet picture is larger than the lawn plant at a full row height. */
         double row_height = s.grid_valid ? 76.0 * s.app_scale * s.camera_scale * size.height / s.app_h
                                          : size.height * 0.14;
-        double side = row_height * 0.65;
-        g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - side / 2,
-                                         sy * size.height / s.surface_h - side / 2, side, side);
+        if (g_cursor_pose) {
+            /* The plant rig uses half-size authored animation coordinates.
+             * Use (200,200) as a provisional anchor for the preview. */
+            double scale = row_height / 76.0 * 0.5;
+            CGRect bounds = g_cursor_pose.bounds;
+            CGPoint anchor = g_cursor_pose.anchor;
+            g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w + (bounds.origin.x - anchor.x) * scale,
+                                             sy * size.height / s.surface_h + (bounds.origin.y - anchor.y) * scale,
+                                             bounds.size.width * scale, bounds.size.height * scale);
+        } else {
+            double side = row_height * 0.65;
+            g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - side / 2,
+                                             sy * size.height / s.surface_h - side / 2, side, side);
+        }
     }
     g_cursor_layer.hidden = !visible;
     [CATransaction commit];
@@ -2888,6 +3251,7 @@ static void cursor_preview_tick(void)
  * (action 0), and one event per character deleted (action 3). */
 - (void)keyDown:(NSEvent *)event
 {
+    cancel_scroll();
     if (!atomic_load(&ready) || (event.modifierFlags & NSEventModifierFlagCommand)) return;
     /* A shortcut: a key that takes a seed packet in hand. The game's own UI is
      * not changed: the packet is pressed exactly as the mouse presses it. */
@@ -3640,6 +4004,8 @@ static void start_updater(void)
  * the game kept presenting while another application had the keyboard. */
 - (void)applicationDidResignActive:(NSNotification *)notification
 {
+    cancel_scroll();
+    g_mouse_buttons_down = 0;
     (void)notification;
     tl_log_line("macos: the app is not frontmost; the game keeps running");
 }

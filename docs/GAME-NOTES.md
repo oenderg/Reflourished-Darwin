@@ -83,12 +83,25 @@ only when the pending pointer changes, and publishes the TypeName, shovel or pla
 Plant food's pending cursor vtable is `0x241d3a0`. Unknown cursor classes are hidden. The host draws a passive
 layer inside the game's Metal layer, and never changes input.
 
-The Mac reads `PROPERTIES/RESOURCES.RTON`, the 1536 seed-packet atlas and the 768 always-loaded atlas from
-the player's bundled or downloaded OBB, on a background queue. It uses the resource IDs above
-and the RTON atlas rectangles, premultiplies the straight-alpha RGBA pixels, and caches the
-cropped images for the launch. Missing images are hidden. This avoids depending on a window
-capture, which can fail or return stale pixels. The setting is on by default; launch with
-`-showCursorPlant NO` to turn it off for a test. `TL_PVZ2_CURSOR_STATS=1` logs frame costs.
+The Mac reads `PROPERTIES/RESOURCES.RTON` and `PACKAGES/PLANTTYPES.RTON` from the player's OBB
+on a serial background queue. Each selected TypeName supplies its PopAnim resource; there is no
+roster filter. Plant previews are composed from the full animation parts, never from packet
+portraits, whose plant pixels are already cut off at the card edges. The reader supports the
+1536 RGBA, ETC1 RGB/A8 and ETC2 RGBA atlases. Atlas indices follow resource order within the
+group, including differently named atlases sharing that group.
+
+The still uses the first resting frame (`idle`, `idle_above`, `plant_idle`, `loop`, or
+`attack1`, in that order), or the initial visible display if there is no resting label.
+Costume and plant-food armour selectors stay hidden for the default appearance. The canvas
+includes all transformed parts, plus a transparent filtering margin. It preserves the authored
+bounds. The preview uses a provisional (200,200) anchor at half scale and scales with the board.
+Alignment with the planted sprite is still unresolved.
+
+Decoded atlases are released after each pose; a 24 MiB cache holds completed stills. The shovel
+and plant food retain their HUD pictures from the 768 always-loaded atlas. Missing or malformed
+assets hide the picture. The setting is on by default; `-showCursorPlant NO` disables it for a
+test. `macos: complete cursor pose <plant>: loaded` confirms the new picture path, and
+`TL_PVZ2_CURSOR_STATS=1` logs the overlay costs.
 
 The pointer cross uses the board's input transform, not fitted screen coordinates. The game
 thread reads app width/height `+0xf4/+0xf8`, app scale `+0x980`, board position `+0x44/+0x48`,
@@ -104,8 +117,8 @@ rechecked on a tile or selection change and every quarter second while still; on
 hidden on an invalid tile. Shovel and plant food retain their cross without this plant-only check.
 While the board is not live,
 including the level introduction, both pointer layers are hidden.
-The picture uses 65% of the geometry's row height throughout the game view, including off the
-lawn, so it scales with the board without changing size at the lawn edge.
+Plant pictures retain their authored size relative to the board throughout the game view,
+including off the lawn. The shovel and plant food use 65% of a row height.
 
 ## In-level key badges
 
