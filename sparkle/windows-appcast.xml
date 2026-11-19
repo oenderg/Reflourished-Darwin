@@ -6,18 +6,18 @@
     <description>Updates of PvZ2 Reflourished for Windows</description>
     <language>en</language>
     <item>
-      <title>PvZ2 Reflourished 1.5.3 for Windows</title>
-      <pubDate>Thu, 19 Nov 2026 12:29:58 +0000</pubDate>
-      <link>https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.3</link>
-      <sparkle:version>10503</sparkle:version>
-      <sparkle:shortVersionString>1.5.3</sparkle:shortVersionString>
+      <title>PvZ2 Reflourished 1.5.4 for Windows</title>
+      <pubDate>Thu, 19 Nov 2026 15:20:13 +0000</pubDate>
+      <link>https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.4</link>
+      <sparkle:version>10504</sparkle:version>
+      <sparkle:shortVersionString>1.5.4</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>10.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[<p><b>Reflourished 1.5.3.</b> The mod's third hotfix (1.5.0-R02), a freeze in Piñata Parties on Windows, and the number keys on conveyor belt levels.</p><ul><li>The mod's 1.5.0-R02 hotfix is included: Zomboid Pods no longer make a second zomboid when you give them plant food just as they finish, Dolphin Rider is no longer invincible when stunned mid-jump, I, Zombie no longer fails you for having no sun in the bank while sun is still on the lawn, and Bassist, Cranblaster, Caesar Salad and Raised Roman Shield Zombie got their fixes too.</li><li>Windows: fixed the game freezing partway through a Piñata Party.</li><li>Mac and Windows: the number keys now pick a conveyor belt's Bowling Bulbs and other tool packets, and the picture under the pointer shows them.</li><li>Mac and Windows: a new "Plant on" setting (Mac: Settings &gt; Keyboard, Windows: Settings &gt; Gameplay) plants on the mouse press instead of the release after you pick a seed with a key.</li><li>Windows: the title screen now shows the mod's news panels, as on Android.</li></ul><p><a href="https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.3">The release on GitHub</a></p>]]></description>
-      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.3/PvZ2-Reflourished-1.5.0-Darwin-1.5.3-Windows-Setup.exe" length="112165320" type="application/octet-stream"
-                 sparkle:edSignature="hUMa71cTWuvfyGS/MVWTw8bWCOE/oPMMrfm7vPZDnJQaKRkxxG9BzSNAoY0gSLo+clZh18rF+66q7JYOC23lAA==" sparkle:os="windows-x64"
+      <description><![CDATA[<p><b>Reflourished 1.5.4.</b> A Windows hotfix.</p><ul><li>Windows (Intel and AMD PCs): after an update, the game now shows its "Getting the game ready for your PC" window while it prepares itself again, instead of a black window that looked stuck.</li></ul><p><a href="https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.4">The release on GitHub</a></p>]]></description>
+      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.4/PvZ2-Reflourished-1.5.0-Darwin-1.5.4-Windows-Setup.exe" length="112172241" type="application/octet-stream"
+                 sparkle:edSignature="DQrFTnjdj6ZGka8qqeCx/2kb+QU5xxlAwTIuFA6Jj7XtQnb1TdZ99gcaqCJEVlrKwm46988AHl/eQP6R1ObVBg==" sparkle:os="windows-x64"
                  sparkle:installerArguments="/SILENT /SP- /NOICONS"/>
-      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.3/PvZ2-Reflourished-1.5.0-Darwin-1.5.3-Windows-Setup.exe" length="112165320" type="application/octet-stream"
-                 sparkle:edSignature="hUMa71cTWuvfyGS/MVWTw8bWCOE/oPMMrfm7vPZDnJQaKRkxxG9BzSNAoY0gSLo+clZh18rF+66q7JYOC23lAA==" sparkle:os="windows-arm64"
+      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.4/PvZ2-Reflourished-1.5.0-Darwin-1.5.4-Windows-Setup.exe" length="112172241" type="application/octet-stream"
+                 sparkle:edSignature="DQrFTnjdj6ZGka8qqeCx/2kb+QU5xxlAwTIuFA6Jj7XtQnb1TdZ99gcaqCJEVlrKwm46988AHl/eQP6R1ObVBg==" sparkle:os="windows-arm64"
                  sparkle:installerArguments="/SILENT /SP- /NOICONS"/>
     </item>
   </channel>
