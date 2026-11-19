@@ -40,6 +40,7 @@ through a guard that turns a fault into a log line instead of a crash.
 | packet vtable +0x90 | the packet's own pointer-down handler (vtables: SeedPacket 0x24b2940, SeedPacket_Tool 0x23af1f0 (conveyor tools, #46), HarvestableBoostPacket 0x24bbfd0; SeedPacket_Powerup 0x23c4760 is left out) | the pick itself |
 | 0x761074 | the game's release decision for a new cursor (PlantCursor vtable 0x2491a60) | a second press cancels, like a second tap |
 | board +0x408 | pending cursor; null when no item is held | read-only selection state |
+| board +0x3f0..+0x3f8, cursor +0x30 | the active cursor vector, and the touch id a cursor is bound to (0: none) | a press waits while an unbound cursor is in the vector and nothing is pending (#48, below) |
 | cursor vtables 0x2491a60, 0x24d8b60 | plant and shovel cursors, respectively | distinguish held plants from the shovel |
 | cursor vtable 0x24896c0 | ToolPacketCursor: a conveyor's tool packet in hand (a PacketCursor like PlantCursor, packet reference at +0x38; the packet's +0x1a8 is the tool's name, e.g. `tool_projectile_bowlingbulb3`, in libc++'s long form) | the preview's TOOL kind, picture `IMAGE_UI_PACKETS_TOOLS_...` (#46) |
 | plant cursor +0x38, packet +0x1a8 | managed reference to the packet, and its libc++ TypeName string | identify the held plant |
@@ -53,6 +54,12 @@ through a guard that turns a fault into a log line instead of a crash.
 | 0x249dfa0, +0x90 = 0x1162138 | PowerupTimeUI's vtable and its pointer-down (selects the power-up) | Z, X, C (`UIPowerupHolder`, buttons named `UIPowerup`; 73 px wide, 98 apart, holder 308 wide for three) |
 | 0x24bcf00 | the pause menu (`PauseDialog`); its rect is at +0x44 | Escape on the pause menu taps RESUME (82% across, 90% down) |
 
+- **A cancelled key pick keeps listening for a frame.** The second press of the same key
+  cancels, but the cancelled cursor stays in the active vector, unbound, until the board's next
+  update. A press that reaches it first runs its pointer-down (0x760a98), which binds itself and
+  calls 0xabc738 to promote the pending cursor; that is null, so the game dies at 0xabc764
+  (issue #48: a key and a click in the same frame). The host holds that press back until the
+  cursor is gone, one call in the tests.
 - **Android's Back does nothing in a level** in this game, so Escape presses the pause button
   instead (and RESUME on the pause menu). Elsewhere it is Back.
 - **Space's exact vtables are what keep rewards out.** Gems, plant food and sprouts share the
