@@ -150,15 +150,6 @@ static void log_error(discord_state *s, const char *json)
     s->log("discord: error %d: %s", code, msg[0] ? msg : "(no message)");
 }
 
-static void log_reply(discord_state *s, const char *what, const char *json, int len)
-{
-    char buf[900];
-    if (len > (int)sizeof(buf) - 1) len = (int)sizeof(buf) - 1;
-    memcpy(buf, json, (size_t)len);
-    buf[len] = 0;
-    s->log("discord: %s: %s", what, buf);
-}
-
 static void disconnect(discord_state *s, int polite, unsigned retry_ticks)
 {
     if (s->conn.handle) {
@@ -216,7 +207,6 @@ static void handle_frame(discord_state *s, unsigned opcode, const unsigned char 
          * shutdown with CLOSE: the code and message are in this payload. Wait
          * longer before the next try, and keep the log quiet until it works. */
         if (!s->quiet) {
-            if (len > 2) log_reply(s, "close reply", json, len);
             if (strstr(json, "\"code\":")) log_error(s, json);
             s->log("discord: the client closed the connection; trying again every 10 s (quietly)");
         }
@@ -227,8 +217,10 @@ static void handle_frame(discord_state *s, unsigned opcode, const unsigned char 
     if (opcode != 1) return;
 
     if (s->stage == ST_HANDSHAKE) {
-        log_reply(s, "handshake reply", json, len);
+        /* Discord's replies are not logged as they are: the handshake's names the player's
+         * Discord account (id, user name, avatar), and pvz2.log is meant to be posted. */
         if (has(json, "\"evt\":\"READY\"") || has(json, "\"evt\": \"READY\"")) {
+            s->log("discord: Discord is ready");
             s->stage = ST_READY;
             s->shown = 0;
             s->quiet = 0;
@@ -239,8 +231,8 @@ static void handle_frame(discord_state *s, unsigned opcode, const unsigned char 
         return;
     }
     if (has(json, "pvz2-activity")) {
-        log_reply(s, "SET_ACTIVITY reply", json, len);
         if (error) log_error(s, json);
+        else s->log("discord: Discord confirmed the activity");
     } else if (has(json, "pvz2-clear")) {
         if (error) log_error(s, json);
         else s->log("discord: Discord confirmed the activity is cleared");
