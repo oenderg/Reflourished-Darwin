@@ -20,6 +20,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.4",
+          "buildVersion": "10504",
+          "date": "2026-11-19",
+          "localizedDescription": "Reflourished 1.5.4. A Windows hotfix.\n\n• Windows (Intel and AMD PCs): after an update, the game now shows its \"Getting the game ready for your PC\" window while it prepares itself again, instead of a black window that looked stuck.",
+          "downloadURL": "https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.4/PvZ2-Reflourished-1.5.0-Darwin-1.5.4-iOS.ipa",
+          "size": 55017764,
+          "minOSVersion": "15.5"
+        },
+        {
           "version": "1.5.3",
           "buildVersion": "10503",
           "date": "2026-11-19",
