@@ -254,6 +254,12 @@ void tl_pvz2_badges(tl_pvz2_badge_snapshot *out);
  * IMAGE_UI_PACKETS_ and the name, as PLANT's, but it has no plant placement to ask about. */
 enum { TL_PVZ2_CURSOR_NONE, TL_PVZ2_CURSOR_PLANT, TL_PVZ2_CURSOR_SHOVEL,
        TL_PVZ2_CURSOR_PLANT_FOOD, TL_PVZ2_CURSOR_TOOL };
+/* The hosts' preview: a plant's packet picture is about this many pixels on its long side
+ * (Peashooter 158x131, Wall-nut 132x131), and a tool's is drawn at that scale; a projectile
+ * tool's bulb is this share of the picture's width right of its centre (Bowling Bulb:
+ * columns 108-203 of 239). Measured from the 1.5.0 OBB. */
+#define PVZ2_PACKET_ART_SIDE 150.0
+#define PVZ2_PROJECTILE_ART_SHIFT 0.149
 typedef struct {
     unsigned int generation;
     int kind;

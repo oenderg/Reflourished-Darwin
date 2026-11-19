@@ -2593,12 +2593,18 @@ static void pointer_tick(void)
     if (!(side > 0)) side = 1;
     int long_side = g_plant_image->width > g_plant_image->height
                         ? g_plant_image->width : g_plant_image->height;
-    double scale = side / (double)long_side;
+    /* A tool's picture is wider than a plant's (239x156 for a Bowling Bulb, its streaks
+     * included, against about 150 for a plant), so it is drawn at a plant picture's scale,
+     * not fitted whole into the plant's square; a projectile's bulb sits right of centre,
+     * and that is where the pointer goes. */
+    int tool = s.kind == TL_PVZ2_CURSOR_TOOL;
+    double scale = side / (double)(tool ? PVZ2_PACKET_ART_SIDE : long_side);
     int dw = (int)((double)g_plant_image->width * scale + 0.5);
     int dh = (int)((double)g_plant_image->height * scale + 0.5);
     if (dw < 1) dw = 1;
     if (dh < 1) dh = 1;
-    int dx = (int)(sx - dw / 2.0);
+    double shift = tool && !strncmp(s.plant, "tools_projectile", 16) ? PVZ2_PROJECTILE_ART_SHIFT * dw : 0;
+    int dx = (int)(sx - dw / 2.0 - shift);
     int dy = (int)(sy - dh / 2.0);
 
     int view_band[8];

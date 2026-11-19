@@ -2859,8 +2859,19 @@ static void cursor_preview_tick(void)
         double row_height = s.grid_valid ? 76.0 * s.app_scale * s.camera_scale * size.height / s.app_h
                                          : size.height * 0.14;
         double side = row_height * 0.65;
-        g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - side / 2,
-                                         sy * size.height / s.surface_h - side / 2, side, side);
+        double w = side, h = side, shift = 0;
+        CGImageRef art = (__bridge CGImageRef)g_cursor_layer.contents;
+        if (s.kind == TL_PVZ2_CURSOR_TOOL && art) {
+            /* A tool's picture is wider than a plant's (239x156 for a Bowling Bulb, its
+             * streaks included, against about 150 for a plant): drawn at a plant picture's
+             * scale, not fitted whole into the plant's square, with a projectile's bulb
+             * (right of centre) under the pointer. */
+            w = side * CGImageGetWidth(art) / PVZ2_PACKET_ART_SIDE;
+            h = side * CGImageGetHeight(art) / PVZ2_PACKET_ART_SIDE;
+            if (!strncmp(s.plant, "tools_projectile", 16)) shift = PVZ2_PROJECTILE_ART_SHIFT * w;
+        }
+        g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - w / 2 - shift,
+                                         sy * size.height / s.surface_h - h / 2, w, h);
     }
     g_cursor_layer.hidden = !visible;
     [CATransaction commit];
