@@ -3852,11 +3852,25 @@ static void guest_seed_pick(int slot)
         tl_log_line("pvz2: the seed pick: the card has no vtable");
         return;
     }
-    void *normal_packet_vtable = tl_aot_guest_data_ptr_any(0x24b2940);
-    if (!normal_packet_vtable || packet_vtable != (uint64_t)(uintptr_t)normal_packet_vtable) {
-        tl_log_line("pvz2: the seed pick: slot %d is not a normal seed packet", slot);
+    /* The packet classes a seed key may press: SeedPacket itself, SeedPacket_Tool (a conveyor
+     * belt's tool packets, the Bowling Bulb's among them: issue #46) and HarvestableBoostPacket.
+     * Each is a SeedPacket with its own pointer-down at +0x90, and each press makes a cursor the
+     * release below handles. SeedPacket_Powerup is left to the power-up keys. */
+    static const struct { uint64_t vtable; const char *name; } k_packets[] = {
+        { 0x24b2940, "SeedPacket" }, { 0x23af1f0, "SeedPacket_Tool" }, { 0x24bbfd0, "HarvestableBoostPacket" },
+    };
+    const char *packet_class = NULL;
+    for (size_t i = 0; i < sizeof k_packets / sizeof k_packets[0] && !packet_class; i++) {
+        void *vt = tl_aot_guest_data_ptr_any(k_packets[i].vtable);
+        if (vt && packet_vtable == (uint64_t)(uintptr_t)vt) packet_class = k_packets[i].name;
+    }
+    if (!packet_class) {
+        tl_log_line("pvz2: the seed pick: slot %d is not a seed packet a key can press (vtable %p)",
+                    slot, (void *)packet_vtable);
         return;
     }
+    if (strcmp(packet_class, "SeedPacket"))
+        tl_log_line("pvz2: the seed pick: slot %d is a %s", slot, packet_class);
     if (!guest_widget_shown(packet)) {
         tl_log_line("pvz2: the seed shortcut: ignored: the seed packet in slot %d is hidden", slot + 1);
         return;

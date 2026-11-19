@@ -37,7 +37,7 @@ through a guard that turns a fault into a log line instead of a crash.
 | board +0x6c8, 0x7dec64 | the pause registry, and the game's own "any pause reason" check | refuse while paused |
 | widget manager (board +0x20) +0xe0 | the modal widget (null when nothing covers the board; +0xc8 is the keyboard focus, not the modal) | refuse behind popups |
 | 0xaa1be8, 0x12d2374 | the seed bank and one packet in it | a seed key (1-4, Q W E R, then 5 and T for a ninth and tenth packet) picks a packet |
-| packet vtable +0x90 | the packet's own pointer-down handler (normal packet vtable 0x24b2940) | the pick itself |
+| packet vtable +0x90 | the packet's own pointer-down handler (vtables: SeedPacket 0x24b2940, SeedPacket_Tool 0x23af1f0 (conveyor tools, #46), HarvestableBoostPacket 0x24bbfd0; SeedPacket_Powerup 0x23c4760 is left out) | the pick itself |
 | 0x761074 | the game's release decision for a new cursor (PlantCursor vtable 0x2491a60) | a second press cancels, like a second tap |
 | board +0x408 | pending cursor; null when no item is held | read-only selection state |
 | cursor vtables 0x2491a60, 0x24d8b60 | plant and shovel cursors, respectively | distinguish held plants from the shovel |
