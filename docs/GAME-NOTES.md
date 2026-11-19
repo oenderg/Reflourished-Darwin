@@ -174,6 +174,15 @@ returns.
   another press. A Universal Control keyboard sends no disconnect (tried on iPadOS 27: GameController
   still reports a keyboard afterwards), so the labels stay until the app restarts.
 
+## Touch IDs
+
+A touch record's id is Android's: the finger's pointer index + 1 (`AndroidUIEventManager`:
+`ident = getPointerId() + 1`), so one finger, the mouse among them, is always 1, and a second
+finger held at the same time is 2. The driver gives each press the lowest id no finger holds
+(`touch_id_for`). The mod's own code depends on it: the carnival minigame's hats (Caliginous
+Carnival, issue #44) took no tap while the ids counted up with every press, and took the odd
+one after a restart, when they were low again.
+
 ## Generated IDs
 
 `Util_GetUUIDString` returns a fresh lowercase version-4 UUID per call, like
