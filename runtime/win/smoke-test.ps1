@@ -5,7 +5,9 @@
 #   pwsh runtime/win/smoke-test.ps1 -Picture <png> -Baseline <png>      (how alike two pictures are)
 #
 # The first start is a new player's: no data but the OBB (linked in, so it is not downloaded), so the x64
-# build translates the game first. The second start must find the translation it saved (x64). Each start
+# build translates the game first. The second start must find the translation it saved (x64). The third (x64
+# only) is an updating player's: a saved translation that no longer matches the game's code must bring up the
+# preparing window, not a black window for as long as the translation takes (#47). Each start
 # passes once the game draws frames and, with -Baseline, once a picture of its window matches the baseline
 # (at least -Match percent alike, within 30 s). Each start's log and picture go to -Out.
 # Exits 1 when a start shows an error, ends on its own, draws nothing in time or draws the wrong picture,
@@ -207,11 +209,47 @@ function Start-Game([string]$name, [int]$minutes, [string[]]$must) {
     return $ok
 }
 
+# An updating player's start (#47): the previous version's translation is there, under the name of other code.
+# The saved module, renamed, stands in for it; the start passes once the log says the preparing window is up,
+# without waiting for the translation, and fails if the game draws first or 3 minutes pass.
+function Start-Update {
+    Write-Host "smoke: update start of $($exe.Name)"
+    $dir = Join-Path $data 'translated'
+    $dll = Get-ChildItem -LiteralPath $dir -Filter '*.dll' | Sort-Object Length -Descending | Select-Object -First 1
+    if (-not $dll) { Write-Host 'smoke: update start: no saved translation to stand in for an older one'; return $false }
+    Rename-Item -LiteralPath $dll.FullName -NewName '00000000000000000000000000000000.dll'
+    if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+    $p = Start-Process -FilePath $exe.FullName -WorkingDirectory $Game -PassThru
+    $deadline = (Get-Date).AddMinutes(3)
+    $ok = $false
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $text = Read-Log
+        if ($text -match 'the preparing window is up') { $ok = $true; break }
+        if ($text -match 'windows: frames=[1-9]') { Write-Host 'smoke: update start: the game drew without translating again'; break }
+        if ($p.HasExited) { Write-Host "smoke: update start: the game ended with exit code $($p.ExitCode)"; break }
+    }
+    if ($ok) {
+        Start-Sleep -Seconds 3
+        Save-Screen (Join-Path $Out 'update.png') $p
+        Write-Host 'smoke: update start: the preparing window is up'
+    } elseif ((Get-Date) -ge $deadline) { Write-Host 'smoke: update start: no preparing window in 3 minutes' }
+    Set-Content -LiteralPath (Join-Path $Out 'update.log') -Value (Read-Log)
+    if (-not $p.HasExited) {
+        Stop-Process -Id $p.Id -Force
+        $p.WaitForExit(30000) | Out-Null
+    }
+    return $ok
+}
+
 $first = Start-Game 'first' $FirstMinutes $(if ($x64) { @('functions translated in') } else { @() })
 $second = $false
 if ($first) {
     $second = Start-Game 'second' $SecondMinutes $(if ($x64) { @('the x64 translation cache is there') } else { @() })
 }
+$update = -not $x64
+if ($first -and $second -and $x64) { $update = Start-Update }
+if ($first -and $second -and -not $update) { Write-Host 'smoke: FAILED: an update start shows no preparing window'; exit 1 }
 if ($first -and $second -and $noBaseline) { Write-Host 'smoke: FAILED: both starts drew, but there is no baseline to compare with'; exit 1 }
 if ($first -and $second) { Write-Host 'smoke: both starts drew the picture they should'; exit 0 }
 Write-Host 'smoke: FAILED'
