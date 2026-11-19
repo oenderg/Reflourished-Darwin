@@ -350,7 +350,9 @@ windows can't cover it) must be at least 90% like `runtime/win/smoke/first-<game
 first start's Welcome screen, within 30 s of the first frames. Each start also fails when its log names a library
 function the game's or the mod's libraries need and this runtime lacks (`ld: <library>: unresolved import`),
 or shows one called (`ld: CALLED an unresolved import`): a missing function returns 0 and the game goes on
-wrongly (#40). Only Crashlytics, which never starts, may lack some. Alike means: both scaled to 64x48, the
+wrongly (#40). Only Crashlytics, which never starts, may lack some. On x64 it also fails on `x64: <name> has no signature`:
+a function added to the Windows runtime needs its line in `runtime/win/x64/sigs-tables.inc` (run
+`runtime/win/x64/gen-all.sh`), or the x64 game gets the same answer-0 stub. Alike means: both scaled to 64x48, the
 share of pixels whose red, green and blue are each within 32. Good runs come out at 100% on x64 and
 ARM64 alike; a black window is about 2%, the same screen in a window of another shape about 37%. The
 `smoke-x64` and `smoke-ARM64` artifacts keep each start's log and picture, and the baseline beside it
