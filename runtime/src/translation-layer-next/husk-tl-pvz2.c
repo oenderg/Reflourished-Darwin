@@ -5091,7 +5091,7 @@ static tl_pvz2_cursor_snapshot g_cursor_published;
 static atomic_uint_fast64_t g_cursor_target;
 static uint64_t g_cursor_board, g_cursor_pending, g_cursor_parent;
 static int g_cursor_kind;
-static char g_cursor_plant[24];
+static char g_cursor_plant[48];
 
 /* The native cursor initializes this service on its first validity query. */
 static uint64_t guest_cursor_placement_service(void)
@@ -5109,6 +5109,36 @@ static uint64_t guest_cursor_placement_service(void)
     if (!ok) { init_failed = true; return 0; }
     if (!guest_read_bytes((uint64_t)(uintptr_t)slot, &singleton, sizeof singleton)) return 0;
     return singleton;
+}
+
+/* A libc++ std::string in guest memory, short or long form, into out (false when it is not
+ * one that fits). Guarded: a stale object reads as nothing. */
+static bool guest_std_string(uint64_t at, char *out, size_t outn)
+{
+    unsigned char s[24] = { 0 };
+    volatile bool got = false;
+    guest_guard_enter();
+    if (sigsetjmp(g_guest_jmp, 1) == 0) got = guest_read_bytes_raw(at, s, sizeof s);
+    guest_guard_leave();
+    if (!got) return false;
+    if (!(s[0] & 1)) {
+        size_t n = s[0] >> 1;
+        if (!n || n >= outn || n > 22) return false;
+        memcpy(out, s + 1, n); out[n] = 0;
+        return true;
+    }
+    uint64_t size = 0, data = 0;
+    memcpy(&size, s + 8, sizeof size);
+    memcpy(&data, s + 16, sizeof data);
+    if (!size || size >= outn || !data) return false;
+    volatile bool got_data = false;
+    guest_guard_enter();
+    if (sigsetjmp(g_guest_jmp, 1) == 0) got_data = guest_read_bytes_raw(data, out, (size_t)size);
+    guest_guard_leave();
+    if (!got_data) return false;
+    out[size] = 0;
+    for (size_t i = 0; i < size; i++) if ((unsigned char)out[i] < 0x20 || (unsigned char)out[i] > 0x7e) return false;
+    return true;
 }
 
 static void guest_cursor_placement(tl_pvz2_cursor_snapshot *geometry, uint64_t board, uint64_t pending)
@@ -5251,6 +5281,22 @@ static void guest_cursor_update(void)
             g_cursor_kind = TL_PVZ2_CURSOR_SHOVEL;
         } else if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x241d3a0)) {
             g_cursor_kind = TL_PVZ2_CURSOR_PLANT_FOOD;
+        } else if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x24896c0)) {
+            /* ToolPacketCursor: a conveyor belt's tool packet (the Bowling Bulb's, #46). A
+             * PacketCursor like PlantCursor, so the packet's reference is at +0x38, and the
+             * packet's name at +0x1a8 is the tool's ("tool_projectile_bowlingbulb3"), long
+             * enough for libc++'s long form. Its picture is IMAGE_UI_PACKETS_TOOLS_...: the
+             * name with "tools_" for "tool_". */
+            bool ok = false;
+            uint64_t registry = guest_call2(guest_code(GUEST_UI_REGISTRY), 0, 0, &ok);
+            uint64_t packet = ok && registry
+                ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x38), &ok) : 0;
+            char name[48] = { 0 };
+            if (ok && packet && guest_std_string(packet + 0x1a8, name, sizeof name) &&
+                !strncmp(name, "tool_", 5) && strlen(name) + 1 < sizeof g_cursor_plant) {
+                snprintf(g_cursor_plant, sizeof g_cursor_plant, "tools_%s", name + 5);
+                g_cursor_kind = TL_PVZ2_CURSOR_TOOL;
+            }
         } else if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x2491a60)) {
             bool ok = false;
             uint64_t registry = guest_call2(guest_code(GUEST_UI_REGISTRY), 0, 0, &ok);
@@ -5276,7 +5322,7 @@ static void guest_cursor_update(void)
     }
     tl_pvz2_cursor_snapshot geometry = {0};
     if (board && pending && (g_cursor_kind == TL_PVZ2_CURSOR_PLANT || g_cursor_kind == TL_PVZ2_CURSOR_SHOVEL ||
-                             g_cursor_kind == TL_PVZ2_CURSOR_PLANT_FOOD)) {
+                             g_cursor_kind == TL_PVZ2_CURSOR_PLANT_FOOD || g_cursor_kind == TL_PVZ2_CURSOR_TOOL)) {
         uint64_t app = atomic_load(&g_app_object);
         /* The mach_vm search that fills g_app_object runs on the Mac; Windows
          * and iPad have none, and a Mac search may still be going. Their

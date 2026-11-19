@@ -1931,8 +1931,8 @@ static const pvz2_cursor_image *pointer_find(const char *key)
 
 static int pointer_key_for(const tl_pvz2_cursor_snapshot *s, char *key, size_t n)
 {
-    if (s->kind == TL_PVZ2_CURSOR_PLANT) {
-        char up[32];
+    if (s->kind == TL_PVZ2_CURSOR_PLANT || s->kind == TL_PVZ2_CURSOR_TOOL) {
+        char up[48];
         int i = 0;
         for (; s->plant[i] && i < (int)sizeof(up) - 1; i++)
             up[i] = (char)toupper((unsigned char)s->plant[i]);

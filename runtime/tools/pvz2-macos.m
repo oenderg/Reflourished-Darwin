@@ -2758,7 +2758,7 @@ static void cursor_preview_tick(void)
         g_cursor_drawn_generation = s.generation;
         g_cursor_layer.contents = nil;
         g_cursor_layer.hidden = YES;
-        NSString *key = s.kind == TL_PVZ2_CURSOR_PLANT
+        NSString *key = s.kind == TL_PVZ2_CURSOR_PLANT || s.kind == TL_PVZ2_CURSOR_TOOL
             ? [@"IMAGE_UI_PACKETS_" stringByAppendingString:[@(s.plant) uppercaseString]]
             : s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
             : s.kind == TL_PVZ2_CURSOR_PLANT_FOOD ? @"IMAGE_UI_HUD_INGAME_PLANTFOOD_BUTTON" : nil;
@@ -2768,7 +2768,7 @@ static void cursor_preview_tick(void)
     bool cross = false, keep_band = false;
     int col = -1, row = -1, x0 = 0, x1 = 0, y0 = 0, y1 = 0, left = 0, right = 0, top = 0, bottom = 0;
     if (visible && (s.kind == TL_PVZ2_CURSOR_PLANT || s.kind == TL_PVZ2_CURSOR_SHOVEL ||
-                    s.kind == TL_PVZ2_CURSOR_PLANT_FOOD) && s.grid_valid) {
+                    s.kind == TL_PVZ2_CURSOR_PLANT_FOOD || s.kind == TL_PVZ2_CURSOR_TOOL) && s.grid_valid) {
         col = tl_cursor_grid_axis(&s, 0, (int)((float)sx + .5f));
         row = tl_cursor_grid_axis(&s, 1, (int)((float)sy + .5f));
         cross = col >= 0 && col < s.columns && row >= 0 && row < s.rows;

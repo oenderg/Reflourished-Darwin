@@ -41,6 +41,7 @@ through a guard that turns a fault into a log line instead of a crash.
 | 0x761074 | the game's release decision for a new cursor (PlantCursor vtable 0x2491a60) | a second press cancels, like a second tap |
 | board +0x408 | pending cursor; null when no item is held | read-only selection state |
 | cursor vtables 0x2491a60, 0x24d8b60 | plant and shovel cursors, respectively | distinguish held plants from the shovel |
+| cursor vtable 0x24896c0 | ToolPacketCursor: a conveyor's tool packet in hand (a PacketCursor like PlantCursor, packet reference at +0x38; the packet's +0x1a8 is the tool's name, e.g. `tool_projectile_bowlingbulb3`, in libc++'s long form) | the preview's TOOL kind, picture `IMAGE_UI_PACKETS_TOOLS_...` (#46) |
 | plant cursor +0x38, packet +0x1a8 | managed reference to the packet, and its libc++ TypeName string | identify the held plant |
 | 0x13ab0a0, vtable 0x24d8b60 | the shovel's pointer-down, and the shovel cursor | S |
 | 0x11beef0, 0x14ea3cc / 0x14ea364 / 0x14ea3b0 / 0x14ea1fc | the iterator over the board's collectables (pool 0x48) | Space |

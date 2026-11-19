@@ -250,13 +250,15 @@ void tl_pvz2_set_badges_enabled(int on);
 void tl_pvz2_badges(tl_pvz2_badge_snapshot *out);
 
 /* A read-only selection, published by the game thread after drawing a frame. */
+/* TOOL is a conveyor belt's tool packet in hand (the Bowling Bulb's): its picture is
+ * IMAGE_UI_PACKETS_ and the name, as PLANT's, but it has no plant placement to ask about. */
 enum { TL_PVZ2_CURSOR_NONE, TL_PVZ2_CURSOR_PLANT, TL_PVZ2_CURSOR_SHOVEL,
-       TL_PVZ2_CURSOR_PLANT_FOOD };
+       TL_PVZ2_CURSOR_PLANT_FOOD, TL_PVZ2_CURSOR_TOOL };
 typedef struct {
     unsigned int generation;
     int kind;
     int live, surface_w, surface_h;
-    char plant[24];
+    char plant[48];
     double changed_at;
     int grid_valid, app_w, app_h, board_x, board_y;
     int columns, rows;
