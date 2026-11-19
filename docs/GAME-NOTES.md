@@ -411,6 +411,10 @@ BASE. R01 (built 2026-11-15 11:37, SHA-256 `9e1f1f5c...`) asks for exactly the s
 a converted Mac run with `HUSK_HOOK_TRACE=1` confirmed none were missing. The driver has no
 hard-coded libRFLib addresses to relocate; its game and cursor addresses are in the unchanged
 libPVZ2. R01's read-only strings add `hollows` as well as changing the tag and build time.
+R02 (built 2026-11-17 15:09, SHA-256 `74e44939...`, timestamp 1794958564) asks for the same 453
+sites again (a `HUSK_HOOK_TRACE=1` Mac run, `aot-hook-sites.py --check`); its strings add
+`ZombieSolarSageEnlightened`. The mod's content updates (its CDN pushes) need no new build: the
+game downloads `mc_<version>.json` and `<version>.main.tar` from the mod's server at every start.
 A build pins one library (`mod_lib` in `data/game-<version>.json`, put into a copy of the APK by
 `scripts/mod-lib.py`). The link names only the newest file, so a build that wants a given one
 needs its own copy.
