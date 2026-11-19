@@ -352,9 +352,12 @@ function the game's or the mod's libraries need and this runtime lacks (`ld: <li
 or shows one called (`ld: CALLED an unresolved import`): a missing function returns 0 and the game goes on
 wrongly (#40). Only Crashlytics, which never starts, may lack some. On x64 it also fails on `x64: <name> has no signature`:
 a function added to the Windows runtime needs its line in `runtime/win/x64/sigs-tables.inc` (run
-`runtime/win/x64/gen-all.sh`), or the x64 game gets the same answer-0 stub. Alike means: both scaled to 64x48, the
-share of pixels whose red, green and blue are each within 32. Good runs come out at 100% on x64 and
-ARM64 alike; a black window is about 2%, the same screen in a window of another shape about 37%. The
+`runtime/win/x64/gen-all.sh`), or the x64 game gets the same answer-0 stub. Alike means: over the Welcome box alone
+(26-74% of the window's width, 17-91% of its height), both scaled to 40x48, the share of pixels whose red,
+green and blue are each within 32. Only the box, because the art behind it shows the mod's live news, which
+its server changes (Hero-Con's panels took a run to 89.8% of the whole window, 2026-11-19). Good runs come
+out at 100% on x64 and ARM64 alike; a black window is 0%, the same screen in a wider window 70%, a stretched
+one 64%. The
 `smoke-x64` and `smoke-ARM64` artifacts keep each start's log and picture, and the baseline beside it
 when a picture did not match.
 

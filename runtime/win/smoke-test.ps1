@@ -30,17 +30,21 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 '@
 [Smoke.Win]::SetProcessDPIAware() | Out-Null
 
-# How alike two pictures are, in percent: both scaled to 64x48, the share of pixels whose red, green and
-# blue are each within 32 of the other's. Runs of the same build on the runners come out at 100, a black
-# window at about 5, the same screen in a window of another shape at about 40.
+# How alike two pictures are, in percent, over the Welcome box alone: the middle of each window (26-74% of
+# its width, 17-91% of its height, all inside the box), scaled to 40x48, the share of pixels whose red, green
+# and blue are each within 32 of the other's. Only the box: the art behind it shows the mod's live news,
+# which its server changes. The box is the game's own, so a black window, broken drawing or a window of
+# another shape (the box moves) still come out far apart.
 function Get-Alike([string]$a, [string]$b) {
-    $w = 64; $h = 48
+    $w = 40; $h = 48
     $small = foreach ($path in $a, $b) {
         $src = [System.Drawing.Image]::FromFile((Resolve-Path -LiteralPath $path).Path)
         $bmp = New-Object System.Drawing.Bitmap $w, $h
         $g = [System.Drawing.Graphics]::FromImage($bmp)
         $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $g.DrawImage($src, 0, 0, $w, $h)
+        $box = New-Object System.Drawing.Rectangle ([int]($src.Width * 0.26)), ([int]($src.Height * 0.17)),
+            ([int]($src.Width * 0.48)), ([int]($src.Height * 0.74))
+        $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $w, $h), $box, [System.Drawing.GraphicsUnit]::Pixel)
         $g.Dispose(); $src.Dispose()
         , $bmp
     }
