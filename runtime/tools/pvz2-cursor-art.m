@@ -89,13 +89,17 @@ static NSData *group_part(FILE *f, uint64_t file_size, const uint8_t *entry, int
 {
     if (depth > 64) @throw @"RTON nesting";
     switch (t) {
-        case 0x00: return @NO; case 0x01: return @YES;
+        case 0x00: return @NO; case 0x01: return @YES; case 0x02: return [NSNull null];
         case 0x09: case 0x0b: case 0x11: case 0x13: case 0x21: case 0x23: case 0x27: case 0x41: case 0x43: case 0x47: return @0;
-        case 0x08: case 0x0a: return @([self fixed:1]);
-        case 0x10: case 0x12: return @([self fixed:2]);
-        case 0x20: case 0x26: return @([self fixed:4]);
+        case 0x08: return @((int8_t)[self fixed:1]);
+        case 0x0a: return @((uint8_t)[self fixed:1]);
+        case 0x10: return @((int16_t)[self fixed:2]);
+        case 0x12: return @((uint16_t)[self fixed:2]);
+        case 0x20: return @((int32_t)[self fixed:4]);
+        case 0x26: return @((uint32_t)[self fixed:4]);
         case 0x22: { uint32_t bits = (uint32_t)[self fixed:4]; float value; memcpy(&value, &bits, 4); return @(value); }
-        case 0x40: case 0x46: return @([self fixed:8]);
+        case 0x40: return @((int64_t)[self fixed:8]);
+        case 0x46: return @((uint64_t)[self fixed:8]);
         case 0x42: { uint64_t bits = [self fixed:8]; double value; memcpy(&value, &bits, 8); return @(value); }
         case 0x24: case 0x28: case 0x44: case 0x48: return @([self varint]);
         case 0x25: case 0x29: case 0x45: case 0x49: { uint64_t n = [self varint]; return @((int64_t)((n >> 1) ^ -(n & 1))); }
@@ -296,7 +300,7 @@ static NSDictionary *pose_sprite(PVZ2PoseReader *r)
     NSMutableDictionary *layers = [NSMutableDictionary dictionary];
     NSArray *first = nil, *idle = nil;
     NSInteger poseRank = NSIntegerMax;
-    NSArray *restLabels = @[@"idle", @"idle_above", @"plant_idle", @"loop", @"attack1"];
+    NSArray *restLabels = @[@"idle_stage1", @"idle1", @"idle_small", @"idle", @"idle_above", @"plant_idle", @"loop", @"attack1"];
     for (NSUInteger frame = 0; frame < frames; frame++) {
         unsigned flags = [r unsignedValue:1];
         if (flags & ~63u) @throw @"unknown animation frame flags";
@@ -371,8 +375,9 @@ static NSDictionary *pose_sprite(PVZ2PoseReader *r)
     return @{@"name": name, @"layers": idle ?: first ?: @[]};
 }
 
-/* RSG's prefix tree indexes both package metadata and animation files. */
-static NSData *pose_file(FILE *f, uint64_t size, const uint8_t *entry, NSString *wanted)
+/* RSG's prefix tree indexes both package metadata and animation files.
+ * Extract all requested names in a single decompression of the group pool. */
+static NSDictionary<NSString *, NSData *> *pose_files(FILE *f, uint64_t size, const uint8_t *entry, NSSet<NSString *> *wanted)
 {
     NSData *header = read_at(f, u32(entry + 0x80), 80, size);
     if (header.length < 80 || memcmp(header.bytes, "pgsr", 4)) return nil;
@@ -381,6 +386,7 @@ static NSData *pose_file(FILE *f, uint64_t size, const uint8_t *entry, NSString 
     NSData *pool = group_part(f, size, entry, 0x18);
     if (!table || !pool || (length & 3)) return nil;
     NSMutableDictionary *branches = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSData *> *found = [NSMutableDictionary dictionary];
     NSMutableString *name = [NSMutableString string];
     const uint8_t *bytes = table.bytes;
     for (NSUInteger pos = 0; pos + 4 <= table.length;) {
@@ -392,11 +398,18 @@ static NSData *pose_file(FILE *f, uint64_t size, const uint8_t *entry, NSString 
         if (pos + 12 > table.length) return nil;
         uint32_t kind = u32(bytes + pos), offset = u32(bytes + pos + 4), n = u32(bytes + pos + 8);
         pos += kind ? 32 : 12;
-        if ([name isEqualToString:wanted] && !kind && offset <= pool.length && n <= pool.length - offset)
-            return [pool subdataWithRange:NSMakeRange(offset, n)];
+        if ([wanted containsObject:name] && !kind && offset <= pool.length && n <= pool.length - offset) {
+            found[[name copy]] = [pool subdataWithRange:NSMakeRange(offset, n)];
+            if (found.count == wanted.count) return found;
+        }
         [name setString:@""];
     }
-    return nil;
+    return found;
+}
+
+static NSData *pose_file(FILE *f, uint64_t size, const uint8_t *entry, NSString *wanted)
+{
+    return pose_files(f, size, entry, [NSSet setWithObject:wanted])[wanted];
 }
 
 static NSDictionary *pose_rton(NSData *data)
@@ -414,7 +427,7 @@ static NSDictionary *pose_rton(NSData *data)
 @property(nonatomic, strong) NSData *entries, *textures;
 @property uint64_t size;
 @property uint32_t stride, texstride;
-@property(nonatomic, strong) NSDictionary *groups, *resources, *plants;
+@property(nonatomic, strong) NSDictionary *groups, *resources, *plants, *artCenters;
 @end
 @implementation PVZ2PoseArchive
 @end
@@ -452,12 +465,30 @@ static PVZ2PoseArchive *pose_archive(FILE *f, NSString *path)
             if ([resource[@"atlas"] boolValue]) atlasIndex++;
         }
     }
-    root = pose_rton(pose_file(f, size, (const uint8_t *)a.entries.bytes + packages.unsignedIntegerValue * stride, @"PACKAGES\\PLANTTYPES.RTON"));
+    const uint8_t *pkgEntry = (const uint8_t *)a.entries.bytes + packages.unsignedIntegerValue * stride;
+    NSDictionary<NSString *, NSData *> *pkgFiles = pose_files(f, size, pkgEntry,
+        [NSSet setWithObjects:@"PACKAGES\\PLANTTYPES.RTON", @"PACKAGES\\PLANTPROPERTIES.RTON", nil]);
+    root = pose_rton(pkgFiles[@"PACKAGES\\PLANTTYPES.RTON"]);
     for (NSDictionary *object in root[@"objects"]) {
         NSDictionary *data = object[@"objdata"];
         if (data[@"TypeName"] && data[@"PopAnim"]) plants[data[@"TypeName"]] = data;
     }
-    a.groups = groups; a.resources = resources; a.plants = plants;
+    /* Read each plant property sheet's ArtCenter (in 600p board units) so every
+     * plant aligns with its actual planted sprite on the lawn tile. */
+    NSMutableDictionary *artCenters = [NSMutableDictionary dictionary];
+    NSDictionary *propRoot = pose_rton(pkgFiles[@"PACKAGES\\PLANTPROPERTIES.RTON"]);
+    for (NSDictionary *object in propRoot[@"objects"]) {
+        NSDictionary *data = object[@"objdata"];
+        NSDictionary *ac = [data[@"ArtCenter"] isKindOfClass:NSDictionary.class] ? data[@"ArtCenter"] : nil;
+        if (!ac || !ac[@"x"] || !ac[@"y"]) continue;
+        double ax = [ac[@"x"] doubleValue], ay = [ac[@"y"] doubleValue];
+        if (!isfinite(ax) || !isfinite(ay) || ax <= -500 || ax >= 500 || ay <= -500 || ay >= 500) continue;
+        NSValue *pt = [NSValue valueWithBytes:&(CGPoint){ax, ay} objCType:@encode(CGPoint)];
+        for (NSString *alias in object[@"aliases"]) {
+            if ([alias isKindOfClass:NSString.class]) artCenters[alias] = pt;
+        }
+    }
+    a.groups = groups; a.resources = resources; a.plants = plants; a.artCenters = artCenters;
     if (!plants.count || !resources.count) return nil;
     cached = a;
     return a;
@@ -620,10 +651,24 @@ PVZ2CursorPose *pvz2_cursor_plant_art(NSString *path, NSString *plant)
         }
         CGImageRef image = CGBitmapContextCreateImage(context);
         CGContextRelease(context);
+        CGPoint artCenter = CGPointMake(99.0, 115.0);
+        NSString *propsRef = a.plants[plant][@"Properties"];
+        if ([propsRef isKindOfClass:NSString.class] && [propsRef hasPrefix:@"RTID("]) {
+            NSRange at = [propsRef rangeOfString:@"@"];
+            if (at.location != NSNotFound && at.location > 5) {
+                NSString *alias = [propsRef substringWithRange:NSMakeRange(5, at.location - 5)];
+                NSValue *pt = a.artCenters[alias];
+                if (pt) [pt getValue:&artCenter size:sizeof artCenter];
+            }
+        }
+        /* A planted plant places its PopAnim origin at (tile_center.x - ArtCenter.x,
+         * tile_center.y + 14 - ArtCenter.y) in 600p board coordinates (libPVZ2 0xe44374).
+         * Converting to 1200p authored PopAnim coordinates (2x) gives the exact point
+         * that lands under the mouse when aiming at a tile center and planting. */
         result = [PVZ2CursorPose new];
         result.image = CFBridgingRelease(image);
         result.bounds = bounds;
-        result.anchor = CGPointMake(200, 200);
+        result.anchor = CGPointMake(artCenter.x * 2.0, (artCenter.y - 14.0) * 2.0);
         if (getenv("TL_PVZ2_POSE_AUDIT")) NSLog(@"pose %@ bounds %.1f,%.1f %.1fx%.1f anchor %.1f,%.1f",plant,bounds.origin.x,bounds.origin.y,bounds.size.width,bounds.size.height,result.anchor.x,result.anchor.y);
     } @catch (id error) {
         NSLog(@"cursor pose %@: %@", plant, error);

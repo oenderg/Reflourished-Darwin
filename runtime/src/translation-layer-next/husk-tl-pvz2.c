@@ -5077,7 +5077,7 @@ static tl_pvz2_cursor_snapshot g_cursor_published;
 static atomic_uint_fast64_t g_cursor_target;
 static uint64_t g_cursor_board, g_cursor_pending, g_cursor_parent;
 static int g_cursor_kind;
-static char g_cursor_plant[24];
+static char g_cursor_plant[64];
 
 /* The native cursor initializes this service on its first validity query. */
 static uint64_t guest_cursor_placement_service(void)
@@ -5243,17 +5243,39 @@ static void guest_cursor_update(void)
             uint64_t packet = ok && registry
                 ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x38), &ok) : 0;
             unsigned char str[24] = { 0 };
+            char name_buf[sizeof g_cursor_plant] = { 0 };
+            size_t name_len = 0;
             volatile bool got_string = false;
             if (ok && packet) {
                 guest_guard_enter();
-                if (sigsetjmp(g_guest_jmp, 1) == 0)
-                    got_string = guest_read_bytes_raw(packet + 0x1a8, str, sizeof str);
+                if (sigsetjmp(g_guest_jmp, 1) == 0) {
+                    if (guest_read_bytes_raw(packet + 0x1a8, str, sizeof str)) {
+                        if (!(str[0] & 1)) {
+                            /* Short libc++ string: length is stored in the top 7 bits of byte 0. */
+                            size_t n = str[0] >> 1;
+                            if (n > 0 && n < sizeof name_buf) {
+                                memcpy(name_buf, str + 1, n);
+                                name_len = n;
+                                got_string = true;
+                            }
+                        } else {
+                            /* Long libc++ string: size at +8, heap data pointer at +16. */
+                            uint64_t n = 0, ptr = 0;
+                            memcpy(&n, str + 8, sizeof n);
+                            memcpy(&ptr, str + 16, sizeof ptr);
+                            if (n > 0 && n < sizeof name_buf && ptr &&
+                                guest_read_bytes_raw(ptr, name_buf, (size_t)n)) {
+                                name_len = (size_t)n;
+                                got_string = true;
+                            }
+                        }
+                    }
+                }
                 guest_guard_leave();
             }
-            if (got_string &&
-                !(str[0] & 1) && (str[0] >> 1) > 0 && (str[0] >> 1) < sizeof g_cursor_plant) {
-                size_t n = str[0] >> 1;
-                memcpy(g_cursor_plant, str + 1, n);
+            if (got_string && name_len > 0 && name_len < sizeof g_cursor_plant) {
+                memcpy(g_cursor_plant, name_buf, name_len);
+                g_cursor_plant[name_len] = 0;
                 g_cursor_kind = TL_PVZ2_CURSOR_PLANT;
                 uint64_t image = registry ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x40), &ok) : 0;
                 g_cursor_parent = ok && image ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(image + 0x68), &ok) : 0;

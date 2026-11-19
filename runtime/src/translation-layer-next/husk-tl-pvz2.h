@@ -256,7 +256,7 @@ typedef struct {
     unsigned int generation;
     int kind;
     int live, surface_w, surface_h;
-    char plant[24];
+    char plant[64];
     double changed_at;
     int grid_valid, app_w, app_h, board_x, board_y;
     int columns, rows;
