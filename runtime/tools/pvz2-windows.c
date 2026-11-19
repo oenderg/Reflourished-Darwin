@@ -162,6 +162,12 @@ static WINDOWPLACEMENT g_windowed_placement;
 static int g_start_fullscreen;
 
 static HWND g_progress;
+#if defined(__x86_64__)
+/* An update: the cache is there but no longer matches the game's code, so the game translates again (issue #47). */
+static int g_progress_update;
+static ULONGLONG g_reprepare_since;
+static void reprepare_tick(HWND h);
+#endif
 static HWND g_progress_bar, g_progress_status;
 static HFONT g_progress_font, g_progress_title_font;
 static UINT g_progress_dpi;
@@ -1175,6 +1181,7 @@ static void view_layout(void)
 #define BADGE_TIMER 103
 #define STATS_TIMER 105
 #define START_TIMER 106
+#define REPREPARE_TIMER 107
 
 static HWND g_badge_win;
 static int g_badge_visible;
@@ -1931,8 +1938,8 @@ static const pvz2_cursor_image *pointer_find(const char *key)
 
 static int pointer_key_for(const tl_pvz2_cursor_snapshot *s, char *key, size_t n)
 {
-    if (s->kind == TL_PVZ2_CURSOR_PLANT) {
-        char up[32];
+    if (s->kind == TL_PVZ2_CURSOR_PLANT || s->kind == TL_PVZ2_CURSOR_TOOL) {
+        char up[48];
         int i = 0;
         for (; s->plant[i] && i < (int)sizeof(up) - 1; i++)
             up[i] = (char)toupper((unsigned char)s->plant[i]);
@@ -2593,12 +2600,18 @@ static void pointer_tick(void)
     if (!(side > 0)) side = 1;
     int long_side = g_plant_image->width > g_plant_image->height
                         ? g_plant_image->width : g_plant_image->height;
-    double scale = side / (double)long_side;
+    /* A tool's picture is wider than a plant's (239x156 for a Bowling Bulb, its streaks
+     * included, against about 150 for a plant), so it is drawn at a plant picture's scale,
+     * not fitted whole into the plant's square; a projectile's bulb sits right of centre,
+     * and that is where the pointer goes. */
+    int tool = s.kind == TL_PVZ2_CURSOR_TOOL;
+    double scale = side / (double)(tool ? PVZ2_PACKET_ART_SIDE : long_side);
     int dw = (int)((double)g_plant_image->width * scale + 0.5);
     int dh = (int)((double)g_plant_image->height * scale + 0.5);
     if (dw < 1) dw = 1;
     if (dh < 1) dh = 1;
-    int dx = (int)(sx - dw / 2.0);
+    double shift = tool && !strncmp(s.plant, "tools_projectile", 16) ? PVZ2_PROJECTILE_ART_SHIFT * dw : 0;
+    int dx = (int)(sx - dw / 2.0 - shift);
     int dy = (int)(sy - dh / 2.0);
 
     int view_band[8];
@@ -3337,6 +3350,12 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             stats_tick();
             return 0;
         }
+#if defined(__x86_64__)
+        if (wp == REPREPARE_TIMER) {
+            reprepare_tick(h);
+            return 0;
+        }
+#endif
         if (wp == START_TIMER) {
             if (!g_starting) {
                 KillTimer(h, START_TIMER);
@@ -3710,9 +3729,13 @@ static LRESULT CALLBACK progress_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                                      margin, MulDiv(16, dpi, 96), width, MulDiv(28, dpi, 96), h, NULL,
                                      GetModuleHandleW(NULL), NULL);
         HWND body = CreateWindowExW(0, L"STATIC",
-                                    L"Plants vs. Zombies 2 was made for phones, which use a different kind of "
-                                    L"processor than your PC. This one-time step translates the game so your PC can "
-                                    L"run it. It takes a few minutes and won't happen again.",
+                                    g_progress_update
+                                    ? L"The game was updated, so the step that translates it for your PC runs again "
+                                      L"for the parts that changed. It takes a few minutes, and the game starts by itself "
+                                      L"when it is done."
+                                    : L"Plants vs. Zombies 2 was made for phones, which use a different kind of "
+                                      L"processor than your PC. This one-time step translates the game so your PC can "
+                                      L"run it. It takes a few minutes and won't happen again.",
                                     WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
                                     margin, MulDiv(48, dpi, 96), width, MulDiv(86, dpi, 96), h, NULL,
                                     GetModuleHandleW(NULL), NULL);
@@ -3759,6 +3782,38 @@ static LRESULT CALLBACK progress_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     default: break;
     }
     return DefWindowProcW(h, msg, wp, lp);
+}
+
+static void show_progress_window(HINSTANCE inst);
+
+/* The cache was there, so no window came up; but an update changes the game's code (a new mod library, a new
+ * runtime), and the translator then translates the changed parts again behind a black window for minutes (issue
+ * #47). The progress says so: work that is still unfinished a second after it began is a real translation, not a
+ * warm cache being read, and the preparing window comes up for it. */
+static void reprepare_tick(HWND h)
+{
+    if (tl_pvz2_frames() > 0 || atomic_load(&g_driver_done) || g_progress) {
+        KillTimer(h, REPREPARE_TIMER);
+        return;
+    }
+    unsigned long long wd = 0, wt = 0, fd = 0, ft = 0;
+    int running = 0;
+    tl_x64_progress(&wd, &wt, &fd, &ft, &running);
+    ULONGLONG now = GetTickCount64();
+    if (!running || !wt || wd >= wt) {
+        g_reprepare_since = 0;
+        return;
+    }
+    if (!g_reprepare_since) {
+        g_reprepare_since = now;
+        tl_log_line("windows: the x64 cache is there, but the game is translating (%llu of %llu functions)", fd, ft);
+        return;
+    }
+    if (now - g_reprepare_since < 1000) return;
+    KillTimer(h, REPREPARE_TIMER);
+    g_progress_update = 1;
+    tl_log_line("windows: the game changed since the cache was made (an update); the preparing window is up");
+    show_progress_window(GetModuleHandleW(NULL));
 }
 
 static void show_progress_window(HINSTANCE inst)
@@ -3837,7 +3892,7 @@ static void show_progress_window(HINSTANCE inst)
     ShowWindow(hwnd, SW_SHOWNORMAL);
     tl_win_darkmode_redraw(hwnd);
     g_progress = hwnd;
-    tl_log_line("windows: the first start translates the game; the preparing window is up");
+    if (!g_progress_update) tl_log_line("windows: the first start translates the game; the preparing window is up");
 }
 #endif
 
@@ -4222,7 +4277,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show)
         show_progress_window(inst);
     } else {
     if (translation_needed()) show_progress_window(inst);
-    else tl_log_line("windows: the x64 translation cache is there; no preparing window");
+    else {
+        tl_log_line("windows: the x64 translation cache is there; the preparing window comes up if it no longer matches");
+        SetTimer(g_hwnd, REPREPARE_TIMER, 250, NULL);
+    }
     }
 #endif
     /* The game starts at the surface chosen above; a window resize cannot

@@ -3113,7 +3113,9 @@ static void cursor_preview_tick(void)
         g_cursor_layer.contents = nil;
         g_cursor_layer.hidden = YES;
         g_cursor_pose = s.kind == TL_PVZ2_CURSOR_PLANT ? cursor_plant_pose(@(s.plant)) : nil;
-        NSString *key = s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
+        NSString *key = s.kind == TL_PVZ2_CURSOR_TOOL
+            ? [@"IMAGE_UI_PACKETS_" stringByAppendingString:[@(s.plant) uppercaseString]]
+            : s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
             : s.kind == TL_PVZ2_CURSOR_PLANT_FOOD ? @"IMAGE_UI_HUD_INGAME_PLANTFOOD_BUTTON" : nil;
         g_cursor_layer.contents = g_cursor_pose ? g_cursor_pose.image : key ? g_cursor_art[key] : nil;
     }
@@ -3121,7 +3123,7 @@ static void cursor_preview_tick(void)
     bool cross = false, keep_band = false;
     int col = -1, row = -1, x0 = 0, x1 = 0, y0 = 0, y1 = 0, left = 0, right = 0, top = 0, bottom = 0;
     if (visible && (s.kind == TL_PVZ2_CURSOR_PLANT || s.kind == TL_PVZ2_CURSOR_SHOVEL ||
-                    s.kind == TL_PVZ2_CURSOR_PLANT_FOOD) && s.grid_valid) {
+                    s.kind == TL_PVZ2_CURSOR_PLANT_FOOD || s.kind == TL_PVZ2_CURSOR_TOOL) && s.grid_valid) {
         col = tl_cursor_grid_axis(&s, 0, (int)((float)sx + .5f));
         row = tl_cursor_grid_axis(&s, 1, (int)((float)sy + .5f));
         cross = col >= 0 && col < s.columns && row >= 0 && row < s.rows;
@@ -3211,8 +3213,7 @@ static void cursor_preview_tick(void)
         double row_height = s.grid_valid ? 76.0 * s.app_scale * s.camera_scale * size.height / s.app_h
                                          : size.height * 0.14;
         if (g_cursor_pose) {
-            /* The plant rig uses half-size authored animation coordinates.
-             * Use (200,200) as a provisional anchor for the preview. */
+            /* The plant rig uses half-size authored animation coordinates. */
             double scale = row_height / 76.0 * 0.5;
             CGRect bounds = g_cursor_pose.bounds;
             CGPoint anchor = g_cursor_pose.anchor;
@@ -3221,8 +3222,19 @@ static void cursor_preview_tick(void)
                                              bounds.size.width * scale, bounds.size.height * scale);
         } else {
             double side = row_height * 0.65;
-            g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - side / 2,
-                                             sy * size.height / s.surface_h - side / 2, side, side);
+            double w = side, h = side, shift = 0;
+            CGImageRef art = (__bridge CGImageRef)g_cursor_layer.contents;
+            if (s.kind == TL_PVZ2_CURSOR_TOOL && art) {
+                /* A tool's picture is wider than a plant's (239x156 for a Bowling Bulb, its
+                 * streaks included, against about 150 for a plant): drawn at a plant picture's
+                 * scale, not fitted whole into the plant's square, with a projectile's bulb
+                 * (right of centre) under the pointer. */
+                w = side * CGImageGetWidth(art) / PVZ2_PACKET_ART_SIDE;
+                h = side * CGImageGetHeight(art) / PVZ2_PACKET_ART_SIDE;
+                if (!strncmp(s.plant, "tools_projectile", 16)) shift = PVZ2_PROJECTILE_ART_SHIFT * w;
+            }
+            g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - w / 2 - shift,
+                                             sy * size.height / s.surface_h - h / 2, w, h);
         }
     }
     g_cursor_layer.hidden = !visible;

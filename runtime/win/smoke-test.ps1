@@ -5,10 +5,13 @@
 #   pwsh runtime/win/smoke-test.ps1 -Picture <png> -Baseline <png>      (how alike two pictures are)
 #
 # The first start is a new player's: no data but the OBB (linked in, so it is not downloaded), so the x64
-# build translates the game first. The second start must find the translation it saved (x64). Each start
+# build translates the game first. The second start must find the translation it saved (x64). The third (x64
+# only) is an updating player's: a saved translation that no longer matches the game's code must bring up the
+# preparing window, not a black window for as long as the translation takes (#47). Each start
 # passes once the game draws frames and, with -Baseline, once a picture of its window matches the baseline
 # (at least -Match percent alike, within 30 s). Each start's log and picture go to -Out.
-# Exits 1 when a start shows an error, ends on its own, draws nothing in time or draws the wrong picture.
+# Exits 1 when a start shows an error, ends on its own, draws nothing in time or draws the wrong picture,
+# or when its log shows a library function the game's libraries need that this runtime lacks.
 param(
     [string]$Game,
     [string]$Obb,
@@ -29,17 +32,21 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 '@
 [Smoke.Win]::SetProcessDPIAware() | Out-Null
 
-# How alike two pictures are, in percent: both scaled to 64x48, the share of pixels whose red, green and
-# blue are each within 32 of the other's. Runs of the same build on the runners come out at 100, a black
-# window at about 5, the same screen in a window of another shape at about 40.
+# How alike two pictures are, in percent, over the Welcome box alone: the middle of each window (26-74% of
+# its width, 17-91% of its height, all inside the box), scaled to 40x48, the share of pixels whose red, green
+# and blue are each within 32 of the other's. Only the box: the art behind it shows the mod's live news,
+# which its server changes. The box is the game's own, so a black window, broken drawing or a window of
+# another shape (the box moves) still come out far apart.
 function Get-Alike([string]$a, [string]$b) {
-    $w = 64; $h = 48
+    $w = 40; $h = 48
     $small = foreach ($path in $a, $b) {
         $src = [System.Drawing.Image]::FromFile((Resolve-Path -LiteralPath $path).Path)
         $bmp = New-Object System.Drawing.Bitmap $w, $h
         $g = [System.Drawing.Graphics]::FromImage($bmp)
         $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $g.DrawImage($src, 0, 0, $w, $h)
+        $box = New-Object System.Drawing.Rectangle ([int]($src.Width * 0.26)), ([int]($src.Height * 0.17)),
+            ([int]($src.Width * 0.48)), ([int]($src.Height * 0.74))
+        $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $w, $h), $box, [System.Drawing.GraphicsUnit]::Pixel)
         $g.Dispose(); $src.Dispose()
         , $bmp
     }
@@ -138,6 +145,25 @@ function Test-Picture([string]$name, $p) {
     return $false
 }
 
+# The functions the game's libraries need and this runtime lacks: the loader names each one at the start
+# ("ld: <library>: unresolved import <name>") and each first call ("ld: CALLED an unresolved import: <name>").
+# A missing function returns 0 when called, so the game goes on wrongly instead of stopping (#40: the mod's
+# __read_chk). Crashlytics, the Android crash reporter, is never started and may lack some; any other
+# library may not, and nothing may call one. The x64 build also needs each host function's argument types
+# (x64/sigs-tables.inc, made by x64/gen-all.sh): one the runtime has but the list lacks gets the same
+# answer-0 stub ("x64: <name> has no signature"). True when the log is clean.
+function Test-Imports([string]$name, [string]$text) {
+    $missing = [regex]::Matches($text, 'ld: (\S+): unresolved import (\S+)') |
+        Where-Object { $_.Groups[1].Value -notlike 'libcrashlytics*' } |
+        ForEach-Object { "$($_.Groups[1].Value): $($_.Groups[2].Value)" }
+    $called = [regex]::Matches($text, 'ld: CALLED an unresolved import: (\S+)') | ForEach-Object { $_.Groups[1].Value }
+    $unsigned = [regex]::Matches($text, 'x64: (\S+) (has no signature|needs a handler of its own)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+    foreach ($m in $missing) { Write-Host "smoke: $name start: this runtime lacks a function the game needs: $m" }
+    foreach ($c in $called) { Write-Host "smoke: $name start: the game called a function this runtime lacks: $c" }
+    foreach ($u in $unsigned) { Write-Host "smoke: $name start: x64 has no signature for $u (run runtime/win/x64/gen-all.sh)" }
+    return -not ($missing -or $called -or $unsigned)
+}
+
 # One start: true once a 5 s frame line shows frames drawn and the picture matches; false on an error, an
 # exit, the time limit or another picture.
 function Start-Game([string]$name, [int]$minutes, [string[]]$must) {
@@ -169,6 +195,7 @@ function Start-Game([string]$name, [int]$minutes, [string[]]$must) {
     elseif (-not $p.HasExited) { Save-Screen (Join-Path $Out "$name.png") $p }
     $text = Read-Log
     Set-Content -LiteralPath (Join-Path $Out "$name.log") -Value $text
+    if (-not (Test-Imports $name $text)) { $ok = $false }
     foreach ($line in $must) {
         if ($text -notmatch [regex]::Escape($line)) { Write-Host "smoke: $name start: the log never says '$line'"; $ok = $false }
     }
@@ -182,11 +209,47 @@ function Start-Game([string]$name, [int]$minutes, [string[]]$must) {
     return $ok
 }
 
+# An updating player's start (#47): the previous version's translation is there, under the name of other code.
+# The saved module, renamed, stands in for it; the start passes once the log says the preparing window is up,
+# without waiting for the translation, and fails if the game draws first or 3 minutes pass.
+function Start-Update {
+    Write-Host "smoke: update start of $($exe.Name)"
+    $dir = Join-Path $data 'translated'
+    $dll = Get-ChildItem -LiteralPath $dir -Filter '*.dll' | Sort-Object Length -Descending | Select-Object -First 1
+    if (-not $dll) { Write-Host 'smoke: update start: no saved translation to stand in for an older one'; return $false }
+    Rename-Item -LiteralPath $dll.FullName -NewName '00000000000000000000000000000000.dll'
+    if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+    $p = Start-Process -FilePath $exe.FullName -WorkingDirectory $Game -PassThru
+    $deadline = (Get-Date).AddMinutes(3)
+    $ok = $false
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $text = Read-Log
+        if ($text -match 'the preparing window is up') { $ok = $true; break }
+        if ($text -match 'windows: frames=[1-9]') { Write-Host 'smoke: update start: the game drew without translating again'; break }
+        if ($p.HasExited) { Write-Host "smoke: update start: the game ended with exit code $($p.ExitCode)"; break }
+    }
+    if ($ok) {
+        Start-Sleep -Seconds 3
+        Save-Screen (Join-Path $Out 'update.png') $p
+        Write-Host 'smoke: update start: the preparing window is up'
+    } elseif ((Get-Date) -ge $deadline) { Write-Host 'smoke: update start: no preparing window in 3 minutes' }
+    Set-Content -LiteralPath (Join-Path $Out 'update.log') -Value (Read-Log)
+    if (-not $p.HasExited) {
+        Stop-Process -Id $p.Id -Force
+        $p.WaitForExit(30000) | Out-Null
+    }
+    return $ok
+}
+
 $first = Start-Game 'first' $FirstMinutes $(if ($x64) { @('functions translated in') } else { @() })
 $second = $false
 if ($first) {
     $second = Start-Game 'second' $SecondMinutes $(if ($x64) { @('the x64 translation cache is there') } else { @() })
 }
+$update = -not $x64
+if ($first -and $second -and $x64) { $update = Start-Update }
+if ($first -and $second -and -not $update) { Write-Host 'smoke: FAILED: an update start shows no preparing window'; exit 1 }
 if ($first -and $second -and $noBaseline) { Write-Host 'smoke: FAILED: both starts drew, but there is no baseline to compare with'; exit 1 }
 if ($first -and $second) { Write-Host 'smoke: both starts drew the picture they should'; exit 0 }
 Write-Host 'smoke: FAILED'

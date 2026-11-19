@@ -6,15 +6,15 @@
     <description>Updates of PvZ2 Reflourished for the Mac (Reflourished-Darwin)</description>
     <language>en</language>
     <item>
-      <title>Reflourished-Darwin 1.5.2 · PvZ2: Reflourished 1.5.0</title>
-      <pubDate>Mon, 16 Nov 2026 11:24:58 +0000</pubDate>
-      <link>https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.2</link>
-      <sparkle:version>10502</sparkle:version>
-      <sparkle:shortVersionString>1.5.2</sparkle:shortVersionString>
+      <title>Reflourished-Darwin 1.5.4 · PvZ2: Reflourished 1.5.0</title>
+      <pubDate>Thu, 19 Nov 2026 15:20:11 +0000</pubDate>
+      <link>https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.4</link>
+      <sparkle:version>10504</sparkle:version>
+      <sparkle:shortVersionString>1.5.4</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <description><![CDATA[<p><b>Reflourished 1.5.2.</b> A Windows hotfix.</p><ul><li>Windows: fixed a bug where, on some starts, the game kept using extra CPU in the background for as long as it ran. It could happen on any PC, more often on Intel and AMD ones.</li></ul><p><a href="https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.2">The release on GitHub</a></p>]]></description>
-      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.2/PvZ2-Reflourished-1.5.0-Darwin-1.5.2-Mac.dmg" length="63547928"
-                 type="application/octet-stream" sparkle:edSignature="K2ixuvoetZpU4jjjIK6gTonbvkSbhKxwz0qiqbXb4UB+2sYE36SWvdnXzzg+8GOep20RBY+6h8ob3dsKCxzZDQ=="/>
+      <description><![CDATA[<p><b>Reflourished 1.5.4.</b> A Windows hotfix.</p><ul><li>Windows (Intel and AMD PCs): after an update, the game now shows its "Getting the game ready for your PC" window while it prepares itself again, instead of a black window that looked stuck.</li></ul><p><a href="https://github.com/oenderg/Reflourished-Darwin/releases/tag/v1.5.4">The release on GitHub</a></p>]]></description>
+      <enclosure url="https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.4/PvZ2-Reflourished-1.5.0-Darwin-1.5.4-Mac.dmg" length="63591534"
+                 type="application/octet-stream" sparkle:edSignature="L5RrS3eJTCyCkAb82q04damWquNz9Y46sc4C9gtqzmg8qt2Vmno41BbKVQlJPIBBKygfgKer2SIt6w0hhA9ODQ=="/>
     </item>
   </channel>
 </rss>

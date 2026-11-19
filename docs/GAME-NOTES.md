@@ -37,10 +37,11 @@ through a guard that turns a fault into a log line instead of a crash.
 | board +0x6c8, 0x7dec64 | the pause registry, and the game's own "any pause reason" check | refuse while paused |
 | widget manager (board +0x20) +0xe0 | the modal widget (null when nothing covers the board; +0xc8 is the keyboard focus, not the modal) | refuse behind popups |
 | 0xaa1be8, 0x12d2374 | the seed bank and one packet in it | a seed key (1-4, Q W E R, then 5 and T for a ninth and tenth packet) picks a packet |
-| packet vtable +0x90 | the packet's own pointer-down handler (normal packet vtable 0x24b2940) | the pick itself |
+| packet vtable +0x90 | the packet's own pointer-down handler (vtables: SeedPacket 0x24b2940, SeedPacket_Tool 0x23af1f0 (conveyor tools, #46), HarvestableBoostPacket 0x24bbfd0; SeedPacket_Powerup 0x23c4760 is left out) | the pick itself |
 | 0x761074 | the game's release decision for a new cursor (PlantCursor vtable 0x2491a60) | a second press cancels, like a second tap |
 | board +0x408 | pending cursor; null when no item is held | read-only selection state |
 | cursor vtables 0x2491a60, 0x24d8b60 | plant and shovel cursors, respectively | distinguish held plants from the shovel |
+| cursor vtable 0x24896c0 | ToolPacketCursor: a conveyor's tool packet in hand (a PacketCursor like PlantCursor, packet reference at +0x38; the packet's +0x1a8 is the tool's name, e.g. `tool_projectile_bowlingbulb3`, in libc++'s long form) | the preview's TOOL kind, picture `IMAGE_UI_PACKETS_TOOLS_...` (#46) |
 | plant cursor +0x38, packet +0x1a8 | managed reference to the packet, and its libc++ TypeName string | identify the held plant |
 | 0x13ab0a0, vtable 0x24d8b60 | the shovel's pointer-down, and the shovel cursor | S |
 | 0x11beef0, 0x14ea3cc / 0x14ea364 / 0x14ea3b0 / 0x14ea1fc | the iterator over the board's collectables (pool 0x48) | Space |
@@ -423,6 +424,10 @@ BASE. R01 (built 2026-11-15 11:37, SHA-256 `9e1f1f5c...`) asks for exactly the s
 a converted Mac run with `HUSK_HOOK_TRACE=1` confirmed none were missing. The driver has no
 hard-coded libRFLib addresses to relocate; its game and cursor addresses are in the unchanged
 libPVZ2. R01's read-only strings add `hollows` as well as changing the tag and build time.
+R02 (built 2026-11-17 15:09, SHA-256 `74e44939...`, timestamp 1794958564) asks for the same 453
+sites again (a `HUSK_HOOK_TRACE=1` Mac run, `aot-hook-sites.py --check`); its strings add
+`ZombieSolarSageEnlightened`. The mod's content updates (its CDN pushes) need no new build: the
+game downloads `mc_<version>.json` and `<version>.main.tar` from the mod's server at every start.
 A build pins one library (`mod_lib` in `data/game-<version>.json`, put into a copy of the APK by
 `scripts/mod-lib.py`). The link names only the newest file, so a build that wants a given one
 needs its own copy.
