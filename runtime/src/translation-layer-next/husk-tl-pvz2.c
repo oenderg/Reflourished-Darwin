@@ -5458,21 +5458,14 @@ static void guest_cursor_update(void)
             uint64_t registry = guest_call2(guest_code(GUEST_UI_REGISTRY), 0, 0, &ok);
             uint64_t packet = ok && registry
                 ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x38), &ok) : 0;
-            unsigned char str[24] = { 0 };
-            volatile bool got_string = false;
-            if (ok && packet) {
-                guest_guard_enter();
-                if (sigsetjmp(g_guest_jmp, 1) == 0)
-                    got_string = guest_read_bytes_raw(packet + 0x1a8, str, sizeof str);
-                guest_guard_leave();
-            }
-            if (got_string &&
-                !(str[0] & 1) && (str[0] >> 1) > 0 && (str[0] >> 1) < sizeof g_cursor_plant) {
-                size_t n = str[0] >> 1;
-                memcpy(g_cursor_plant, str + 1, n);
+            /* The plant's name, in either of libc++'s forms: the Roman items of the 1.5.0 mod
+             * have long ones ("zoybeanpod_miniboss_attack_melee", issue #49). */
+            if (ok && packet && guest_std_string(packet + 0x1a8, g_cursor_plant, sizeof g_cursor_plant)) {
                 g_cursor_kind = TL_PVZ2_CURSOR_PLANT;
                 uint64_t image = registry ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x40), &ok) : 0;
                 g_cursor_parent = ok && image ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(image + 0x68), &ok) : 0;
+            } else {
+                memset(g_cursor_plant, 0, sizeof g_cursor_plant);
             }
         }
     }
