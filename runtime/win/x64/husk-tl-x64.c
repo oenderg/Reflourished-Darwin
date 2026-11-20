@@ -461,6 +461,235 @@ static DWORD WINAPI sampler(void *arg)
     }
     return 0;
 }
+/* TL_X64_HOT=<seconds>: where the guest threads' time goes, summed. A thread samples every guest thread's host RIP
+ * about every millisecond (threads whose cycle count did not move are waiting and only counted as such) and every
+ * <seconds> logs, per thread, its busy share and its busiest places: a translated guest function (by its guest
+ * address and the library's symbol, if any) or a host module's function (the nearest export, so a system DLL's
+ * internal function shows as the export below it). Time outside translated code is also summed by its caller: the
+ * first return address on the stack inside our program (an offset in the .exe, for llvm-symbolizer) or in translated
+ * code (a guest function). A frame that took 34 ms or more is logged with the places its samples fell in. Then the
+ * host functions the guest called most in that window. */
+unsigned long tl_pvz2_frames(void);
+
+#define HOT_SLOTS 16384
+typedef struct { uint64_t key; unsigned n; } hot_slot;
+static hot_slot g_hot[HOT_SLOTS];
+
+static void hot_add(uint64_t key)
+{
+    for (unsigned i = (unsigned)((key * 0x9E3779B97F4A7C15ull) >> 50) % HOT_SLOTS, k = 0; k < HOT_SLOTS; k++, i = (i + 1) % HOT_SLOTS) {
+        if (g_hot[i].key == key) { g_hot[i].n++; return; }
+        if (!g_hot[i].key) { g_hot[i].key = key; g_hot[i].n = 1; return; }
+    }
+}
+
+/* Host modules by index (keys hold the index, not the address), each with its exports sorted by address. */
+typedef struct { uint32_t rva; const char *name; } hot_export;
+typedef struct { HMODULE h; uint64_t lo, hi; char name[64]; hot_export *ex; uint32_t nex; } hot_module;
+static hot_module g_hmods[48];
+static int g_nhmods;
+
+static int hot_export_cmp(const void *a, const void *b)
+{
+    uint32_t x = ((const hot_export *)a)->rva, y = ((const hot_export *)b)->rva;
+    return x < y ? -1 : x > y;
+}
+
+static int hot_module_of(uint64_t addr)
+{
+    for (int i = 0; i < g_nhmods; i++) if (addr >= g_hmods[i].lo && addr < g_hmods[i].hi) return i;
+    HMODULE h = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)(uintptr_t)addr, &h) || !h || g_nhmods >= 48) return -1;
+    hot_module *m = &g_hmods[g_nhmods];
+    const uint8_t *b = (const uint8_t *)h;
+    const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)(b + ((const IMAGE_DOS_HEADER *)b)->e_lfanew);
+    m->h = h; m->lo = (uint64_t)(uintptr_t)h; m->hi = m->lo + nt->OptionalHeader.SizeOfImage;
+    char path[MAX_PATH];
+    if (GetModuleFileNameA(h, path, sizeof(path))) { const char *s = strrchr(path, '\\'); snprintf(m->name, sizeof(m->name), "%s", s ? s + 1 : path); }
+    const IMAGE_DATA_DIRECTORY *dd = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (dd->VirtualAddress && dd->Size) {
+        const IMAGE_EXPORT_DIRECTORY *ed = (const IMAGE_EXPORT_DIRECTORY *)(b + dd->VirtualAddress);
+        const uint32_t *names = (const uint32_t *)(b + ed->AddressOfNames), *funcs = (const uint32_t *)(b + ed->AddressOfFunctions);
+        const uint16_t *ords = (const uint16_t *)(b + ed->AddressOfNameOrdinals);
+        m->ex = calloc(ed->NumberOfNames ? ed->NumberOfNames : 1, sizeof(hot_export));
+        for (uint32_t k = 0; m->ex && k < ed->NumberOfNames; k++) {
+            uint32_t rva = funcs[ords[k]];
+            if (rva >= dd->VirtualAddress && rva < dd->VirtualAddress + dd->Size) continue; /* a forwarder */
+            m->ex[m->nex].rva = rva; m->ex[m->nex].name = (const char *)(b + names[k]); m->nex++;
+        }
+        if (m->nex) qsort(m->ex, m->nex, sizeof(hot_export), hot_export_cmp);
+    }
+    return g_nhmods++;
+}
+
+static const char *hot_export_at(const hot_module *m, uint32_t rva)
+{
+    const char *best = NULL;
+    for (uint32_t lo = 0, hi = m->nex; lo < hi;) {
+        uint32_t mid = (lo + hi) / 2;
+        if (m->ex[mid].rva <= rva) { best = m->ex[mid].name; lo = mid + 1; } else hi = mid;
+    }
+    return best;
+}
+
+/* Keys: bits 56-63 the thread (index + 1), bit 55 a host module's place (module index << 32 | rva), bit 54 a
+ * caller in our program (rva), bit 53 a caller in translated code (guest function); else a guest function. */
+#define HOT_HOST   (1ull << 55)
+#define HOT_BYEXE  (1ull << 54)
+#define HOT_BYAOT  (1ull << 53)
+#define HOT_MASK   0x001fffffffffffffull
+
+static void hot_name(uint64_t key, char *out, size_t n)
+{
+    uint64_t v = key & HOT_MASK;
+    if (key & HOT_HOST) {
+        int mi = (int)(v >> 32);
+        uint32_t rva = (uint32_t)v;
+        if (mi == 0xffff) { snprintf(out, n, "no module (JIT or anonymous code)"); return; }
+        const hot_module *m = &g_hmods[mi];
+        const char *ex = hot_export_at(m, rva);
+        snprintf(out, n, "%s!%s+%#x", m->name, ex ? ex : "?", rva);
+    } else if (key & HOT_BYEXE) {
+        snprintf(out, n, "called from the exe +%#llx", (unsigned long long)v);
+    } else {
+        const char *lib = NULL; const void *sa = NULL;
+        const char *sym = tl_ld_symbol_at((const void *)(uintptr_t)v, &lib, &sa);
+        snprintf(out, n, "%sguest %#llx %s %s", key & HOT_BYAOT ? "called from " : "", (unsigned long long)v, lib ? lib : "?", sym ? sym : "");
+    }
+}
+
+/* The per-frame samples of the thread that presents (the busiest thread of the last window), for slow frames. */
+static uint64_t g_frame_keys[256];
+static unsigned g_frame_n;
+
+static void hot_frame_log(double ms)
+{
+    uint64_t k2[16] = { 0 }; unsigned c2[16] = { 0 };
+    for (unsigned i = 0; i < g_frame_n && i < 256; i++) {
+        int j = 0;
+        while (j < 16 && k2[j] && k2[j] != g_frame_keys[i]) j++;
+        if (j < 16) { k2[j] = g_frame_keys[i]; c2[j]++; }
+    }
+    char line[900]; int len = snprintf(line, sizeof(line), "x64 hot: slow frame %.0f ms (%u samples):", ms, g_frame_n);
+    for (int r = 0; r < 4; r++) {
+        int b = -1;
+        for (int j = 0; j < 16; j++) if (c2[j] && (b < 0 || c2[j] > c2[b])) b = j;
+        if (b < 0) break;
+        char nm[200]; hot_name(k2[b], nm, sizeof(nm));
+        len += snprintf(line + len, sizeof(line) - (size_t)len, " %u %s;", c2[b], nm);
+        c2[b] = 0;
+        if (len >= (int)sizeof(line) - 1) break;
+    }
+    tl_log_line("%s", line);
+}
+
+static DWORD WINAPI hot_sampler(void *arg)
+{
+    DWORD report_ms = (DWORD)(uintptr_t)arg;
+    HANDLE th[256] = { 0 };
+    ULONG64 cyc[256] = { 0 };
+    unsigned busy[256] = { 0 }, idle[256] = { 0 };
+    static unsigned prev_calls[TL_X64_STUBS];
+    memcpy(prev_calls, g_svc_count, sizeof(prev_calls));
+    timeBeginPeriod(1);
+    HMODULE exe = GetModuleHandleA(NULL);
+    int exe_mi = hot_module_of((uint64_t)(uintptr_t)exe);
+    uint64_t exe_lo = exe_mi >= 0 ? g_hmods[exe_mi].lo : 0, exe_hi = exe_mi >= 0 ? g_hmods[exe_mi].hi : 0;
+    DWORD start = GetTickCount();
+    LARGE_INTEGER qf, frame_t0; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&frame_t0);
+    unsigned long last_frames = tl_pvz2_frames();
+    int frame_thread = -1, slow_logged = 0;
+    for (;;) {
+        Sleep(1);
+        unsigned long fr = tl_pvz2_frames();
+        if (fr != last_frames) {
+            LARGE_INTEGER now; QueryPerformanceCounter(&now);
+            double ms = 1000.0 * (double)(now.QuadPart - frame_t0.QuadPart) / (double)qf.QuadPart / (double)(fr - last_frames);
+            if (ms >= 34.0 && fr - last_frames == 1 && slow_logged < 30) { hot_frame_log(ms); slow_logged++; }
+            frame_t0 = now; last_frames = fr; g_frame_n = 0;
+        }
+        int n = atomic_load(&g_nthreads);
+        for (int i = 0; i < n && i < 256; i++) {
+            tl_thread *t = g_threads[i];
+            if (!t || !t->tid) continue;
+            if (!th[i]) th[i] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, t->tid);
+            if (!th[i]) continue;
+            ULONG64 c = 0;
+            if (QueryThreadCycleTime(th[i], &c) && c - cyc[i] < 20000) { cyc[i] = c; idle[i]++; continue; }
+            cyc[i] = c;
+            if (SuspendThread(th[i]) == (DWORD)-1) continue;
+            CONTEXT ctx;
+            memset(&ctx, 0, sizeof(ctx));
+            ctx.ContextFlags = CONTEXT_CONTROL;
+            BOOL got = GetThreadContext(th[i], &ctx);
+            uint64_t stack[512]; SIZE_T nread = 0;
+            if (got) {
+                uint64_t rip = (uint64_t)ctx.Rip, gs = 0, ge = 0, goff = 0;
+                if (!(g_mod && snx_recompiled_host_function(g_mod, rip, &gs, &ge, &goff)))
+                    for (SIZE_T want = sizeof(stack); want >= 512 && !nread; want /= 2)
+                        if (!ReadProcessMemory(GetCurrentProcess(), (LPCVOID)(uintptr_t)ctx.Rsp, stack, want, &nread)) nread = 0;
+            }
+            ResumeThread(th[i]);
+            if (!got) continue;
+            busy[i]++;
+            uint64_t rip = (uint64_t)ctx.Rip, gs = 0, ge = 0, goff = 0, key, by = 0;
+            if (g_mod && snx_recompiled_host_function(g_mod, rip, &gs, &ge, &goff)) key = gs & HOT_MASK;
+            else {
+                int mi = hot_module_of(rip);
+                key = HOT_HOST | (mi < 0 ? (0xffffull << 32) : ((uint64_t)mi << 32 | (uint32_t)(rip - g_hmods[mi].lo)));
+                /* The caller: the first stack word that points into our program or into translated code. */
+                bool in_exe = rip >= exe_lo && rip < exe_hi;
+                for (SIZE_T w = 0; !in_exe && w < nread / 8; w++) {
+                    uint64_t v = stack[w];
+                    if (v >= exe_lo && v < exe_hi) { by = HOT_BYEXE | (v - exe_lo); break; }
+                    if (v >> 40 && g_mod && snx_recompiled_host_function(g_mod, v, &gs, &ge, &goff)) { by = HOT_BYAOT | (gs & HOT_MASK); break; }
+                }
+            }
+            uint64_t tag = (uint64_t)(i + 1) << 56;
+            hot_add(tag | key);
+            if (by) hot_add(tag | by);
+            if (i == frame_thread && g_frame_n < 256) g_frame_keys[g_frame_n++] = key;
+        }
+        if (GetTickCount() - start < report_ms) continue;
+        start = GetTickCount();
+        slow_logged = 0;
+        unsigned most = 0;
+        for (int i = 0; i < n && i < 256; i++) {
+            if (!busy[i] && !idle[i]) continue;
+            if (busy[i] > most) { most = busy[i]; frame_thread = i; }
+            tl_log_line("x64 hot: cpu %d busy %u ms of %u sampled (%.0f%%)", i, busy[i], busy[i] + idle[i],
+                        100.0 * busy[i] / (busy[i] + idle[i] ? busy[i] + idle[i] : 1));
+            for (int pass = 0; pass < 2 && busy[i] >= 20; pass++) {
+                if (pass) tl_log_line("x64 hot:   time outside translated code, by caller:");
+                for (int k = 0; k < (pass ? 12 : 20); k++) {
+                    hot_slot *best = NULL;
+                    for (unsigned s = 0; s < HOT_SLOTS; s++) {
+                        uint64_t key = g_hot[s].key;
+                        if (key >> 56 != (uint64_t)(i + 1) || !g_hot[s].n) continue;
+                        bool caller = (key & (HOT_BYEXE | HOT_BYAOT)) != 0;
+                        if (caller != (pass == 1)) continue;
+                        if (!best || g_hot[s].n > best->n) best = &g_hot[s];
+                    }
+                    if (!best) break;
+                    char nm[200]; hot_name(best->key, nm, sizeof(nm));
+                    tl_log_line("x64 hot:   %5.1f%% %s", 100.0 * best->n / busy[i], nm);
+                    best->n = 0;
+                }
+            }
+            busy[i] = idle[i] = 0;
+        }
+        memset(g_hot, 0, sizeof(g_hot));
+        unsigned top[10] = { 0 }; uint32_t at[10] = { 0 };
+        for (uint32_t s = 1; s < TL_X64_STUBS; s++) {
+            unsigned d = g_svc_count[s] - prev_calls[s]; prev_calls[s] = g_svc_count[s];
+            for (int k = 0; k < 10; k++) if (d > top[k]) { for (int m = 9; m > k; m--) { top[m] = top[m - 1]; at[m] = at[m - 1]; } top[k] = d; at[k] = s; break; }
+        }
+        for (int k = 0; k < 10 && top[k]; k++) tl_log_line("x64 hot: host call %u x %s", top[k], g_ent[at[k]].name ? g_ent[at[k]].name : "?");
+    }
+    return 0;
+}
+
 static void register_thread(tl_thread *t)
 {
     static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
@@ -470,6 +699,13 @@ static void register_thread(tl_thread *t)
     if (getenv("TL_X64_SAMPLE") && InitOnceBeginInitialize(&once, 0, &pending, NULL) && pending) {
         CloseHandle(CreateThread(NULL, 0, sampler, (void *)(uintptr_t)(atof(getenv("TL_X64_SAMPLE")) * 1000), 0, NULL));
         InitOnceComplete(&once, 0, NULL);
+    }
+    static INIT_ONCE hot_once = INIT_ONCE_STATIC_INIT;
+    pending = FALSE;
+    if (getenv("TL_X64_HOT") && InitOnceBeginInitialize(&hot_once, 0, &pending, NULL) && pending) {
+        double s = atof(getenv("TL_X64_HOT"));
+        CloseHandle(CreateThread(NULL, 0, hot_sampler, (void *)(uintptr_t)((s > 0 ? s : 5) * 1000), 0, NULL));
+        InitOnceComplete(&hot_once, 0, NULL);
     }
 }
 
