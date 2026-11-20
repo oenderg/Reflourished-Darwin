@@ -76,6 +76,7 @@
 void *tl_jni_native_host(const char *cls, const char *name, const char *sig);
 #define tl_jni_native(c, n, s) tl_jni_native_host((c), (n), (s))
 #define GUEST_FN(p, sig) ((p) ? tl_x64_host_fn((uint64_t)(uintptr_t)(p), (sig)) : NULL)
+static void clip_shortcut_install(tl_lib *rfl);
 #else
 #define GUEST_FN(p, sig) ((void *)(p))
 #endif
@@ -2764,6 +2765,9 @@ bool tl_pvz2_start(const tl_ga_config *cfg)
     else {
         tl_lib *rfl = load("libRFLib.so");
         if (rfl) tl_ld_init(rfl);
+#if defined(__x86_64__)
+        if (rfl) clip_shortcut_install(rfl);
+#endif
     }
     if (getenv("TL_PVZ2_PROBE")) {
         tl_ld_probe(game, 0x166bf4c, probe_changed);
@@ -2880,6 +2884,95 @@ static void *guest_find_widget(const char *name);
 static bool guest_anchored_rect(void *widget, int *out);
 static double guest_surface_scale(void);
 static void *guest_code(uint64_t guest_vaddr);
+
+#if defined(__x86_64__)
+/* The game's "draw a polygon trimmed to a rectangle" (libPVZ2 0x1762604: renderer, rect {x, y, w, h} as ints, polygon:
+ * up to 100 corners of 32 bytes inline, then the corners' pointer at +0xc80 and their count at +0xc88). It copies the
+ * corners and trims them against the left, top, right and bottom edges in four passes, copying every corner it keeps,
+ * then draws what is left as a triangle fan (0x1762190: renderer, 6, count - 2, corners, renderer+0x2c, +0x30). On
+ * x86-64 that is translated code and a host memcpy per kept corner: on the News page, which trims every picture of
+ * its list each frame, it held the game at about 41 fps on a fast PC. Most polygons are wholly inside or wholly
+ * past one edge; for those the result is known without the passes, and the shortcut gives it:
+ *   - inside: every corner has x >= left, y >= top, x < right, y < bottom (the passes' own tests: >= for the left
+ *     and top edges, < for the right and bottom ones). Each pass then keeps every corner, in order, unchanged, so the
+ *     game would draw exactly these corners: the shortcut draws them.
+ *   - past an edge: every corner left of the left edge (the first pass keeps none), or more than a pixel above the
+ *     top, right of the right or below the bottom (a corner an earlier pass makes is a blend of two such corners,
+ *     so it stays past that edge too; the pixel covers the blend's rounding). Nothing is drawn.
+ * Fewer than 3 corners draw nothing either way. Anything else (and NaNs, huge coordinates, an inverted rect) goes to
+ * the game's own code. TL_PVZ2_NO_CLIP_SHORTCUT=1 leaves the game's function alone. */
+#define GUEST_CLIP_DRAW_POLYGON 0x1762604
+#define GUEST_DRAW_PRIMITIVES   0x1762190
+typedef void (*clip_draw_fn)(void *, void *, void *);
+typedef void (*draw_prims_fn)(void *, int, int, void *, int, int);
+static clip_draw_fn g_clip_game;
+static draw_prims_fn g_draw_prims;
+static uint64_t g_clip_trampoline;
+static unsigned long long g_clip_n[3];   /* inside, past an edge, the game's code */
+
+static void clip_draw_shortcut(void *self, void *rect, void *poly)
+{
+    int32_t r[4], n = 0;
+    const uint8_t *v = NULL;
+    memcpy(r, rect, sizeof r);
+    memcpy(&v, (const uint8_t *)poly + 0xc80, sizeof v);
+    memcpy(&n, (const uint8_t *)poly + 0xc88, sizeof n);
+    int kind = 2;
+    if (n < 3) kind = 1;
+    else if (v && n <= 4096 && r[2] >= 0 && r[3] >= 0) {
+        const float L = (float)r[0], T = (float)r[1];
+        const float R = (float)(int32_t)((uint32_t)r[0] + (uint32_t)r[2]), B = (float)(int32_t)((uint32_t)r[1] + (uint32_t)r[3]);
+        bool inside = true, left = true, above = true, right = true, below = true, sane = true;
+        for (int32_t i = 0; i < n; i++) {
+            float x, y;
+            memcpy(&x, v + (size_t)i * 32, 4);
+            memcpy(&y, v + (size_t)i * 32 + 4, 4);
+            if (!(x > -1e6f && x < 1e6f && y > -1e6f && y < 1e6f)) { sane = false; break; }
+            if (!(x >= L && y >= T && x < R && y < B)) inside = false;
+            if (!(x < L)) left = false;
+            if (!(y < T - 1.0f)) above = false;
+            if (!(x >= R + 1.0f)) right = false;
+            if (!(y >= B + 1.0f)) below = false;
+        }
+        if (sane && inside) kind = 0;
+        else if (sane && (left || above || right || below)) kind = 1;
+    }
+    g_clip_n[kind]++;
+    if (kind == 0) {
+        int32_t a = 0, b = 0;
+        memcpy(&a, (const uint8_t *)self + 0x2c, 4);
+        memcpy(&b, (const uint8_t *)self + 0x30, 4);
+        g_draw_prims(self, 6, n - 2, (void *)v, a, b);
+    } else if (kind == 2) {
+        g_clip_game(self, rect, poly);
+    }
+    /* A line every 10 s while it is used: the News page alone trims about 50,000 polygons a frame */
+    if (((g_clip_n[0] + g_clip_n[1] + g_clip_n[2]) & 0xfff) == 0) {
+        static double last;
+        double now = now_s();
+        if (now - last >= 10.0) {
+            last = now;
+            tl_log_line("pvz2: trimmed polygons so far: %llu inside, %llu past an edge, %llu by the game's code",
+                        g_clip_n[0], g_clip_n[1], g_clip_n[2]);
+        }
+    }
+}
+
+static void clip_shortcut_install(tl_lib *rfl)
+{
+    if (getenv("TL_PVZ2_NO_CLIP_SHORTCUT")) { tl_log_line("pvz2: the polygon trimming shortcut is off"); return; }
+    typedef void (*hook_fn)(void *, void *, void *);
+    hook_fn hook = (hook_fn)GUEST_FN(tl_ld_sym(rfl, "A64HookFunction"), "vlll");
+    void *site = guest_code(GUEST_CLIP_DRAW_POLYGON), *draw = guest_code(GUEST_DRAW_PRIMITIVES);
+    uint64_t mine = tl_x64_export("pvz2 polygon trimming shortcut", (void *)clip_draw_shortcut, "vlll");
+    if (!hook || !site || !draw || !mine) { tl_log_line("pvz2: the polygon trimming shortcut is not installed"); return; }
+    g_draw_prims = (draw_prims_fn)GUEST_FN(draw, "vliilii");
+    hook(site, (void *)(uintptr_t)mine, &g_clip_trampoline);
+    if (!g_clip_trampoline) { tl_log_line("pvz2: A64HookFunction gave no way back to the game's trimming"); return; }
+    g_clip_game = (clip_draw_fn)GUEST_FN((void *)(uintptr_t)g_clip_trampoline, "vlll");
+    tl_log_line("pvz2: the polygon trimming shortcut is in (game code at %#llx)", (unsigned long long)g_clip_trampoline);
+}
+#endif
 /* The seed tray and the shovel, in the surface's own space, and where they came
  * from. The host asks for a shortcut's position; this is what it answers with. */
 static int g_tray[4];              /* x, y, w, h -- the surface's space */
