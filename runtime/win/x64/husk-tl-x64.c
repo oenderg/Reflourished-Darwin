@@ -18,6 +18,7 @@
 #include "husk-tl-x64.h"
 
 #include <windows.h>
+#include <xmmintrin.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -521,6 +522,10 @@ uint64_t tl_guest_call_regs8(uint64_t pc, const uint64_t gp[8], const uint64_t f
     c->x[8] = x8;
     c->x[30] = g_stop;
     c->pc = pc;
+    /* The translated code assumes MXCSR's default word (round to nearest, no flush to zero, every exception masked)
+     * and no longer checks it on each function's entry (scarletnx.patch): Windows x64 keeps MXCSR's control bits
+     * callee-saved, so setting it here, where every run of translated code starts, covers what the code calls. */
+    if ((_mm_getcsr() & 0xFFC0u) != 0x1F80u) _mm_setcsr(0x1F80u);
     snx_recompiled_run(g_mod, c, pc, g_stop);
     uint64_t r = c->x[0];
     if (fpret) *fpret = c->v[0].d[0];
