@@ -196,6 +196,17 @@ stays). A 1000 Hz mouse otherwise put 14 to 60 moves into each frame, and the se
 works per move, which on a translated x64 PC dropped it to about 40 fps (issue #36). On the Mac
 with a 1000 Hz test drag: 11002 moves reached the game before, about one per frame after.
 
+## Block sizes
+
+The game writes one byte past the end of a 664-byte animated object (a `PopAnimRig` at +0x10) as
+Holiday Mashup's levels start. Android's allocator makes that a 768-byte block and the Mac's a
+672-byte one, so the byte lands in slack. Windows' heap keeps its own header right after an
+exact-size block, so the byte damaged it and a later free closed the game without a word
+(0xc0000374, issue #45). `tl_malloc` on Windows (runtime/win/tl-win-compat.c) now rounds to
+Android-like size classes: 16-byte steps to 128, four classes per doubling to 64 KiB, whole pages
+past that. A guard build (a canary after each block, freed blocks held back and checked) found
+nothing else written past an end in Holiday Mashup Day 3.
+
 ## Generated IDs
 
 `Util_GetUUIDString` returns a fresh lowercase version-4 UUID per call, like
