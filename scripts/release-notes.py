@@ -4,6 +4,8 @@
   scripts/release-notes.py <release-dir> --version <v> --tag <tag> [--since <ref>] [--repo <owner/name>]
   scripts/release-notes.py --assets <json> --version <v> --tag <tag> [...]
   scripts/release-notes.py --whats-new --version <v> [--format md|text|html]
+  scripts/release-notes.py --updates --version <v>
+  scripts/release-notes.py --check-updates --version <v> --tag <tag> [--since <ref>]
 
 The first form prints the release page's Markdown: release-notes/<version>.md as
 What's new, the feat/fix/perf commits since the previous tag (or --since) folded
@@ -13,6 +15,13 @@ instead, from `gh release view <tag> --json assets` saved to a file: the release
 workflow uses it once the Windows files join the Apple ones. The last form prints
 only What's new: as plain text for the AltStore / SideStore changelog, or as HTML
 for the Mac update window.
+
+An "Updates: Windows" line in the notes names the apps the release changes (iPhone and
+iPad, Mac, Windows, comma-separated; no line means all of them). Only those apps' update
+feeds move to the release; the others stay on the release before, so nobody is told about
+an update that changes nothing for them. The line is never shown. --updates prints the
+apps as ios, mac and windows; --check-updates refuses notes that leave out an app whose
+own files changed since the previous release.
 Python 3 standard library only.
 """
 
@@ -37,12 +46,76 @@ KINDS = [("-iOS.ipa", "iPhone / iPad"), ("-iOS-Full.ipa", "iPhone / iPad, game d
 QUICK = [("-iOS.ipa", "iPhone / iPad"), ("-Mac.dmg", "Mac"), ("-Windows-Setup.exe", "Windows")]
 
 
-def whats_new(version):
+# The apps a release can update, the names the Updates line may use for each, and the files
+# only that app is built from (a change anywhere else may change every app).
+APPS = [("ios", "iPhone and iPad", ("iphone and ipad", "iphone/ipad", "iphone", "ipad", "ios"),
+         ("runtime/tools/pvz2-ios", "runtime/scripts/build_angle_ios.sh", "prebuilt/ios/",
+          "converter/build-ios-dylibs.sh", "runtime/tools/regress/build-ios-")),
+        ("mac", "Mac", ("mac", "macos"),
+         ("runtime/tools/pvz2-macos", "runtime/tools/macos-icon.swift", "runtime/tools/pvz2-discord-macos.c",
+          "converter/build-macos-dylibs.sh", "runtime/tools/regress/build-macos-app.sh")),
+        ("windows", "Windows", ("windows", "pc"),
+         ("runtime/win/", "runtime/tools/pvz2-windows", "runtime/tools/pvz2-discord-windows.c",
+          "prebuilt/win-", "prebuilt/winsparkle/"))]
+UPDATES = re.compile(r"^updates:(.*)$", re.I | re.M)
+
+
+def notes_file(version):
     path = os.path.join(NOTES, f"{version}.md")
     if not os.path.isfile(path):
         sys.exit(f"no release notes for {version}: write {os.path.relpath(path, ROOT)} first "
                  "(release-notes/README.md)")
-    return open(path).read().strip()
+    return open(path).read()
+
+
+def whats_new(version):
+    return UPDATES.sub("", notes_file(version)).strip()
+
+
+def updates(version):
+    """The apps the release updates, as keys of APPS: the Updates line's, or all of them."""
+    lines = UPDATES.findall(notes_file(version))
+    if not lines:
+        return [key for key, *_ in APPS]
+    if len(lines) > 1:
+        sys.exit(f"release-notes/{version}.md has {len(lines)} Updates lines; keep one")
+    named = set()
+    for word in (w.strip().lower() for w in lines[0].split(",")):
+        if word == "all":
+            named.update(key for key, *_ in APPS)
+            continue
+        key = next((key for key, _, names, _ in APPS if word in names), None)
+        if not key:
+            sys.exit(f"release-notes/{version}.md: Updates names \"{word}\"; use iPhone and iPad, Mac, "
+                     "Windows or All, comma-separated")
+        named.add(key)
+    if not named:
+        sys.exit(f"release-notes/{version}.md: the Updates line names no app")
+    return [key for key, *_ in APPS if key in named]
+
+
+def check_updates(version, tag, since):
+    """Refuse notes that leave out an app whose own files changed since the previous release."""
+    apps = updates(version)
+    if not since:
+        since = git("describe", "--tags", "--abbrev=0", "--match", "v*", "--exclude", tag, "HEAD")
+    if not since:
+        print("release-notes: no earlier release, every app is updated")
+        return
+    changed = git("diff", "--name-only", f"{since}..HEAD").splitlines()
+    problems = []
+    for key, name, _, own in APPS:
+        if key in apps:
+            continue
+        mine = [f for f in changed if f.startswith(own) and not f.endswith(".md")]
+        if mine:
+            problems.append(f"{name} is left out, but its own files changed since {since}: "
+                            + ", ".join(mine[:5]) + (" ..." if len(mine) > 5 else ""))
+    if problems:
+        sys.exit(f"release-notes/{version}.md: " + "; ".join(problems)
+                 + ". Add the app to the Updates line, or take the line out to update every app.")
+    names = [name for key, name, *_ in APPS if key in apps]
+    print(f"release-notes: {version} updates {', '.join(names)} (checked against {since})")
 
 
 def git(*args):
@@ -151,7 +224,18 @@ def main():
     p.add_argument("--repo", default="oenderg/Reflourished-Darwin")
     p.add_argument("--whats-new", action="store_true")
     p.add_argument("--format", choices=["md", "text", "html"], default="md")
+    p.add_argument("--updates", action="store_true", help="print the apps the release updates")
+    p.add_argument("--check-updates", action="store_true",
+                   help="check the Updates line against the files changed since the previous release")
     args = p.parse_args()
+    if args.updates:
+        print(" ".join(updates(args.version)))
+        return
+    if args.check_updates:
+        if not args.tag:
+            p.error("--check-updates needs --tag")
+        check_updates(args.version, args.tag, args.since)
+        return
     if args.whats_new:
         md = whats_new(args.version)
         print({"md": md, "text": as_text(md), "html": as_html(md)}[args.format])

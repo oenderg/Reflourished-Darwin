@@ -7,7 +7,10 @@ app's update feed are updated in the same run when the slim apps are built.
 ## Running the build
 
 First write the release's What's new in `release-notes/<version>.md` and push it: the run stops at
-its first step without it ([release-notes/README.md](../release-notes/README.md)). Then
+its first step without it ([release-notes/README.md](../release-notes/README.md)). When the
+release changes only some apps, its notes say which with an `Updates:` line (say `Updates: Windows`):
+only those apps' update feeds move to it, so iPhone, iPad and Mac players are not told about a
+Windows-only release, and the other way round. The release page still has every file. Then
 Actions > **Build** > Run workflow, with:
 
 | Input | Meaning |
@@ -90,6 +93,8 @@ seconds, and again just before the upload, in case another run published the tag
 - a tag that exists without a release on another commit (a version that was not bumped, or a
   deleted release: look before deleting the tag);
 - `build-inputs`, the draft that holds the build's inputs.
+- an `Updates:` line that leaves out an app whose own files changed since the previous release
+  (`release-notes.py --check-updates`; Markdown files do not count).
 
 The upload step itself also stops on a published release without `replace_release`.
 

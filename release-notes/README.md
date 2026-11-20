@@ -11,3 +11,11 @@ stops without it. `scripts/release-notes.py` puts the release's page together fr
    steps, the same every release.
 
 The same What's new text is the AltStore / SideStore changelog and the Mac update window's notes.
+
+**Which apps it updates.** A release that changes only some apps names them in one line,
+`Updates: Windows` (or `iPhone and iPad`, `Mac`, `Windows`, comma-separated; no line means all).
+The publish run moves only those apps' update feeds (the AltStore / SideStore source for iPhone and
+iPad, the Mac and Windows update feeds) to the release; the others stay on the release before, so
+nobody is told about an update that changes nothing for them. The line is not shown anywhere. A
+publishing run refuses a line that leaves out an app whose own files (the Windows folder, the Mac or
+iPhone app's sources) changed since the previous release; shared code is for you to judge.

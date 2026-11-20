@@ -757,7 +757,12 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -f "release/$PREFIX-iOS.ipa" ]; then
+          # Only the apps on the notes' Updates line move to this release (all of them without one):
+          # the others' feeds stay on the release before, so their users are not told about it.
+          updates=" $(python3 scripts/release-notes.py --updates --version "$VERSION") "
+          echo "this release updates:$updates"
+          in_update() { case "$updates" in *" $1 "*) return 0 ;; esac; echo "$2: not in this update, its feed stays"; return 1; }
+          if [ -f "release/$PREFIX-iOS.ipa" ] && in_update ios "the AltStore source (iPhone and iPad)"; then
             python3 scripts/update-altstore-source.py "release/$PREFIX-iOS.ipa" --tag "$TAG" \
               --changelog "$(python3 scripts/release-notes.py --whats-new --version "$VERSION" --format text)"
             python3 scripts/update-altstore-source.py --check
@@ -769,7 +774,7 @@ jobs:
           else
             # Every update is the slim app or the setup, signed with the key whose public half the
             # apps carry. The key goes to sign_update on stdin, never to a file or the log.
-            if [ -f "release/$PREFIX-Mac.dmg" ]; then
+            if [ -f "release/$PREFIX-Mac.dmg" ] && in_update mac "the Mac update feed"; then
               scripts/fetch-sparkle.sh out/.work/sparkle
               sig="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | out/.work/sparkle/bin/sign_update --ed-key-file - -p "release/$PREFIX-Mac.dmg")"
               python3 scripts/update-appcast.py "release/$PREFIX-Mac.dmg" --tag "$TAG" --ed-signature "$sig" \
@@ -778,7 +783,7 @@ jobs:
               git add sparkle/appcast.xml
               git diff --cached --quiet || git commit -m "chore(sparkle): update the Mac update feed for $TAG"
             fi
-            if [ -f "release/$PREFIX-Windows-Setup.exe" ]; then
+            if [ -f "release/$PREFIX-Windows-Setup.exe" ] && in_update windows "the Windows update feed"; then
               printf '%s' "$SPARKLE_PRIVATE_KEY" | scripts/publish-windows-setup.sh \
                 "release/$PREFIX-Windows-Setup.exe" --tag "$TAG" --key-file - --commit
             fi

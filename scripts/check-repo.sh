@@ -93,6 +93,9 @@ if python3 scripts/release-notes.py --assets "$tmp/assets.json" --version "$VERS
 else
     problem "scripts/release-notes.py failed: $(cat "$tmp/err")"
 fi
+# The notes' Updates line (which apps' update feeds move) must name apps the script knows.
+python3 scripts/release-notes.py --updates --version "$VERSION" > /dev/null 2> "$tmp/err" ||
+    problem "$(cat "$tmp/err")"
 
 files="$(git ls-files '*.md' 'release-notes/*' | grep -v -e '^runtime/tools/vendor/' -e '^converter/third_party/')"
 hits="$(printf '%s\n' "$files" | xargs grep -n $'\xe2\x80\x94' 2>/dev/null)"

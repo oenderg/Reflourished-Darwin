@@ -13,6 +13,8 @@
 #     replace the release's files of the same name (a rebuild of one platform, say).
 #   - A tag that exists without a release must name this commit: a tag on another commit is a version
 #     that was not bumped, or a release that was deleted, and both need a person to look.
+#   - The notes' Updates line (release-notes.py) must not leave out an app whose own files changed
+#     since the previous release: its users would not be told about an update that changes their app.
 set -euo pipefail
 
 tag="${1:-}"
@@ -61,3 +63,6 @@ case "$state" in
         echo "check-publish: $tag is new; this run publishes it from $GITHUB_SHA"
         ;;
 esac
+
+python3 scripts/release-notes.py --check-updates --version "$APP_VERSION" --tag "$tag" ||
+    fail "the Updates line in release-notes/$APP_VERSION.md does not match what changed (above)."
