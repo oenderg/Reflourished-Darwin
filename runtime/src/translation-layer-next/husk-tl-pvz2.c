@@ -3923,6 +3923,12 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
         tl_log_line("pvz2: %s: the new cursor is another class (vtable %p, want %p); released the same way",
                     what, (void *)vtable, want_vtable);
     }
+    /* +0x20 is the cursor's own "finished" mark (the game's removal, guest 0x760f6c, sets
+     * it first). An item that acts on its own press -- the Roman Piñata items that send
+     * troops at once (issue #49) -- has already finished its cursor here. A tap on its
+     * packet still releases it the same way, so the key does too, but nothing is held. */
+    uint8_t finished = 0;
+    guest_read_bytes(cursor + 0x20, &finished, sizeof finished);
     void *release = guest_code(GUEST_CURSOR_RELEASE);
     bool call_ok = false;
     guest_call2(release, cursor, 0, &call_ok);
@@ -3948,6 +3954,10 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
         tl_log_line("pvz2: %s: unexpected pending cursor %p (wanted %p)",
                     what, (void *)pending, (void *)cursor);
         return -1;
+    }
+    if (finished) {
+        tl_log_line("pvz2: %s: the item acted on its own press; nothing is held", what);
+        return 0;
     }
     g_key_cursor_board = board;
     g_key_cursor = cursor;
@@ -5248,6 +5258,9 @@ static atomic_uint_fast64_t g_cursor_target;
 static uint64_t g_cursor_board, g_cursor_pending, g_cursor_parent;
 static int g_cursor_kind;
 static char g_cursor_plant[48];
+/* The held card aims rather than plants: its cursor plays the game's target reticle (the
+ * Roman Piñata items, issue #49), and a click anywhere on the lawn uses it. */
+static bool g_cursor_aim;
 
 /* The native cursor initializes this service on its first validity query. */
 static uint64_t guest_cursor_placement_service(void)
@@ -5311,6 +5324,13 @@ static void guest_cursor_placement(tl_pvz2_cursor_snapshot *geometry, uint64_t b
     int y = (int)(uint32_t)target - 1;
     int col = tl_cursor_grid_axis(geometry, 0, x), row = tl_cursor_grid_axis(geometry, 1, y);
     if (col < 0 || col >= geometry->columns || row < 0 || row >= geometry->rows) {
+        last_board = last_pending = 0; known = 0;
+        return;
+    }
+    if (g_cursor_aim) {
+        /* An aimed item takes any tile of the lawn: the game asks no plant question. */
+        geometry->placement_known = geometry->placement_allowed = 1;
+        geometry->placement_col = col; geometry->placement_row = row;
         last_board = last_pending = 0; known = 0;
         return;
     }
@@ -5406,11 +5426,13 @@ static void guest_cursor_update(void)
         g_cursor_board = g_cursor_pending = g_cursor_parent = 0;
         g_cursor_kind = TL_PVZ2_CURSOR_NONE;
         g_cursor_plant[0] = 0;
+        g_cursor_aim = false;
     }
     if (!atomic_load(&g_cursor_enabled)) {
         g_cursor_board = g_cursor_pending = g_cursor_parent = 0;
         g_cursor_kind = TL_PVZ2_CURSOR_NONE;
         g_cursor_plant[0] = 0;
+        g_cursor_aim = false;
         if (stats_enabled) {
             static double total, worst;
             static unsigned frames;
@@ -5427,11 +5449,16 @@ static void guest_cursor_update(void)
     double started = now_s();
     uint64_t pending = 0, vt = 0;
     uint64_t board = guest_cursor_live_probe(&pending, &vt);
+    /* A finished cursor (+0x20) is one whose item already acted -- the Roman items that send
+     * troops on their own press leave theirs pending after a tap (issue #49): nothing to show. */
+    uint8_t finished = 0;
+    if (pending && guest_read_bytes(pending + 0x20, &finished, sizeof finished) && finished) pending = 0;
     if (board != g_cursor_board || pending != g_cursor_pending) {
         g_cursor_board = board;
         g_cursor_pending = pending;
         g_cursor_parent = 0;
         g_cursor_kind = TL_PVZ2_CURSOR_NONE;
+        g_cursor_aim = false;
         memset(g_cursor_plant, 0, sizeof g_cursor_plant);
         if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x24d8b60)) {
             g_cursor_kind = TL_PVZ2_CURSOR_SHOVEL;
@@ -5462,6 +5489,13 @@ static void guest_cursor_update(void)
              * have long ones ("zoybeanpod_miniboss_attack_melee", issue #49). */
             if (ok && packet && guest_std_string(packet + 0x1a8, g_cursor_plant, sizeof g_cursor_plant)) {
                 g_cursor_kind = TL_PVZ2_CURSOR_PLANT;
+                /* The cursor's animation (+0x28) and what it plays (+0x38): a plant plays its
+                 * own "idle"; an aimed item plays the reticle the game draws while it aims. */
+                uint64_t rig = 0;
+                char playing[32] = { 0 };
+                g_cursor_aim = guest_read_bytes(pending + 0x28, &rig, sizeof rig) && rig &&
+                               guest_std_string(rig + 0x38, playing, sizeof playing) &&
+                               !strcmp(playing, "banana_lock_recticle");
                 uint64_t image = registry ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x40), &ok) : 0;
                 g_cursor_parent = ok && image ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(image + 0x68), &ok) : 0;
             } else {
@@ -5520,8 +5554,9 @@ static void guest_cursor_update(void)
         static uint64_t last_pending;
         if (pending != last_pending) {
             last_pending = pending;
-            if (pending) tl_log_line("pvz2: cursor probe: plant %s kind %d row_offset %.2f valid %d",
-                                     g_cursor_plant, g_cursor_kind, geometry.row_offset, geometry.grid_valid);
+            if (pending) tl_log_line("pvz2: cursor probe: plant %s kind %d%s row_offset %.2f valid %d",
+                                     g_cursor_plant, g_cursor_kind, g_cursor_aim ? " (aims)" : "",
+                                     geometry.row_offset, geometry.grid_valid);
         }
     }
     pthread_mutex_lock(&g_cursor_lock);
