@@ -380,6 +380,17 @@ The runtime's made-up `/proc/meminfo` and `/proc/self/status` are not what it sh
 - `Resources_GetAssetFileSize` must return -1 for a missing asset (0 hangs start-up).
 - The game's ContentDownloader reads the CDN archive through zlib's `gz*` functions. The
   archive is gzip despite its `.tar` suffix; the HTTP bridge must pass its bytes unchanged.
+- **Drawing a polygon trimmed to a rectangle** (0x1762604: renderer, rect `{x, y, w, h}` as ints,
+  polygon with up to 100 corners of 32 bytes inline, the corners' pointer at +0xc80 and their count at
+  +0xc88; x at +0, y at +4). It copies the corners and trims them against the left, top, right and
+  bottom edges in four passes (0x1762a54 for the left and top edges, inside is `>=`; 0x17631ec for the
+  right and bottom ones, inside is `<`; a side with both corners inside keeps its second corner, so a
+  polygon wholly inside comes out unchanged and in order), then draws what is left as a triangle fan
+  (0x1762190: renderer, 6, count - 2, corners, renderer+0x2c, +0x30). The News page calls it about
+  50,000 times a frame (the whole news text, mostly outside the box): on ARM that holds 60 fps, but
+  translated on x86-64 it held the page near 41 fps. The x86-64 driver hooks it and draws wholly-inside
+  polygons and skips wholly-outside ones itself (runtime/win/README.md, "Where the x64 build spends
+  its time"). The mod hooks neither function.
 
 Android's package metadata in the pinned APK is version code `675`, version name `1.4.0` (separate
 from the mod's `VERSION`). File-system resource getters return block count, available blocks and

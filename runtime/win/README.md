@@ -342,6 +342,33 @@ clip the status line.
 `python3 runtime/win/test-progress.py` exercises the production estimator block without
 Windows or game data, including 100/120/540-second synthetic runs, gating, stalls and completion.
 
+## Where the x64 build spends its time
+
+`TL_X64_HOT=<seconds>` (default 5) starts a sampler in the x64 build. About every millisecond it reads
+where each guest thread is (a thread whose cycle count did not move is counted as waiting) and every
+`<seconds>` logs, per thread, its busy share and its busiest places: a translated guest function by its
+guest address, or a host module's function as the nearest export below it (a system DLL's internal
+function shows under the export before it). Time outside translated code is also listed by its caller,
+the first stack word that points into the .exe (an offset for `llvm-symbolizer --obj`) or into
+translated code; a hit in the .exe's data is a stale word and means nothing. Frames of 34 ms or more are
+logged with the places their samples fell in, and each window ends with the host functions the guest
+called most. The guest address minus `0x5a0000000000` minus libPVZ2's start (`0x1bc000`) is the offset
+in `libPVZ2.so`.
+
+Two costs it found (#36, a fast PC with a 1000 Hz mouse):
+
+- **The floating-point control word.** ScarletNX makes every generated function call `snx_fp_env` on
+  entry, which reads MXCSR (STMXCSR) and resets it when it drifted. In call-heavy guest code (the seed
+  picker's list while it scrolls) that was up to half of a slow frame. Windows x64 keeps MXCSR's
+  control bits callee-saved, so `scarletnx.patch` drops the per-entry call on Windows x64 (and changes
+  both cache keys, so a PC translates once more) and `husk-tl-x64.c` sets the default word where it
+  starts a run of translated code.
+- **Polygon trimming.** The News page asks the engine to trim about 50,000 polygons to a rectangle every
+  frame (GAME-NOTES, "Other things that cost time"); translated, with a host memcpy per kept corner, that
+  held it at about 41 fps. The driver hooks that function on x86-64 and answers the polygons that are
+  wholly inside or wholly past an edge itself (pixel-identical captures with it on and off; 172 to 175
+  fps on a 175 Hz display). `TL_PVZ2_NO_CLIP_SHORTCUT=1` turns it off.
+
 ## Pointer overlay measurements
 
 The overlay timer follows the display independently of the game's FPS and input rate. Its
