@@ -190,6 +190,12 @@ finger held at the same time is 2. The driver gives each press the lowest id no 
 Carnival, issue #44) took no tap while the ids counted up with every press, and took the odd
 one after a restart, when they were low again.
 
+Moves are merged the way Android batches them: a move that arrives while the game has not yet
+taken the finger's last queued move replaces that move's point (the first one's previous point
+stays). A 1000 Hz mouse otherwise put 14 to 60 moves into each frame, and the seed picker's scroll
+works per move, which on a translated x64 PC dropped it to about 40 fps (issue #36). On the Mac
+with a 1000 Hz test drag: 11002 moves reached the game before, about one per frame after.
+
 ## Generated IDs
 
 `Util_GetUUIDString` returns a fresh lowercase version-4 UUID per call, like
