@@ -34,6 +34,39 @@ the APK is the slim one).
 The x64 program (`runtime/win/x64/build-x64.sh`) takes the same `game`/`game-portable` targets
 and links `prebuilt/winsparkle/x64` for the installed one.
 
+### The x64 program from a Mac or Linux
+
+The release workflow builds the x64 program in MSYS2's CLANG64 shell on Windows. The same program can be
+cross-built on a Mac or Linux, with no Windows and no MSYS2:
+
+```sh
+TL_WIN_TOOLCHAIN=<toolchain folder> runtime/win/build-x64-cross.sh game-portable
+```
+
+It needs what the ARM64 build needs (`runtime/win/setup-toolchain.sh` unpacks llvm-mingw; `LLVM_MINGW` names
+another copy, a Linux host's own release) and `cmake`, `ninja`, `git`, `curl`, `zstd`, `python3` and a `clang`
+for the one helper ScarletNX runs while it builds. The script then:
+
+1. unpacks the MSYS2 CLANG64 packages pinned in `runtime/win/x64/cross/msys2-sysroot.txt` (versions and SHA-256
+   hashes, the same versions as `msys2-clang64.txt`): LLVM 23's headers, CMake package and import library for
+   Windows, and the DLLs the program ships with (`runtime/win/x64/cross/setup-sysroot.sh`);
+2. builds ScarletNX's recompiler library at the pinned commit with `scarletnx.patch` for x86-64 Windows
+   (`x64/scarletnx/build-scarletnx.sh` with `X64_CROSS_SYSROOT` set; ScarletNX's own CMake supports this
+   cross-build, its `windows-cross` preset, and takes LLVM from the sysroot's CMake package);
+3. builds the program (`x64/build-x64.sh`, same script, llvm-mingw's x86-64 tools) and collects the DLLs it
+   needs (`x64/collect-dlls.sh`) into `out/win-x64-runtime`, which `package-zip.sh` and
+   `build-installer.sh` take as `--x64-runtime`.
+
+The compiler, C runtime and Windows headers are llvm-mingw's; only LLVM and the DLLs come from MSYS2, so the
+runtime DLLs are the same files the MSYS2 build ships. The program's own C++ (the dark mode shim) links libc++
+and libunwind statically, so the process has one libc++ DLL, the one `libLLVM-23.dll` brings, and the program
+imports only `libLLVM-23.dll` and `libwinpthread-1.dll` besides Windows' own. `collect-dlls.sh` stops when a
+program imports a `lib*.dll` it cannot find, so a missing runtime DLL fails the build, not the player's start.
+A cross-built program starts, translates the game from scratch and plays under CrossOver on a Mac; the MSYS2
+build stays the one the release workflow publishes until the cross-built one has run on a Windows PC. The
+workflow cross-builds it on every Windows run (`windows-x64-cross`) and starts it twice in the MSYS2 zip's place
+(`smoke-x64-cross`); neither holds a release back.
+
 ## ANGLE
 
 The program draws through ANGLE over Direct3D 11: `libEGL.dll` and `libGLESv2.dll` beside it,
@@ -308,6 +341,33 @@ clip the status line.
 
 `python3 runtime/win/test-progress.py` exercises the production estimator block without
 Windows or game data, including 100/120/540-second synthetic runs, gating, stalls and completion.
+
+## Where the x64 build spends its time
+
+`TL_X64_HOT=<seconds>` (default 5) starts a sampler in the x64 build. About every millisecond it reads
+where each guest thread is (a thread whose cycle count did not move is counted as waiting) and every
+`<seconds>` logs, per thread, its busy share and its busiest places: a translated guest function by its
+guest address, or a host module's function as the nearest export below it (a system DLL's internal
+function shows under the export before it). Time outside translated code is also listed by its caller,
+the first stack word that points into the .exe (an offset for `llvm-symbolizer --obj`) or into
+translated code; a hit in the .exe's data is a stale word and means nothing. Frames of 34 ms or more are
+logged with the places their samples fell in, and each window ends with the host functions the guest
+called most. The guest address minus `0x5a0000000000` minus libPVZ2's start (`0x1bc000`) is the offset
+in `libPVZ2.so`.
+
+Two costs it found (#36, a fast PC with a 1000 Hz mouse):
+
+- **The floating-point control word.** ScarletNX makes every generated function call `snx_fp_env` on
+  entry, which reads MXCSR (STMXCSR) and resets it when it drifted. In call-heavy guest code (the seed
+  picker's list while it scrolls) that was up to half of a slow frame. Windows x64 keeps MXCSR's
+  control bits callee-saved, so `scarletnx.patch` drops the per-entry call on Windows x64 (and changes
+  both cache keys, so a PC translates once more) and `husk-tl-x64.c` sets the default word where it
+  starts a run of translated code.
+- **Polygon trimming.** The News page asks the engine to trim about 50,000 polygons to a rectangle every
+  frame (GAME-NOTES, "Other things that cost time"); translated, with a host memcpy per kept corner, that
+  held it at about 41 fps. The driver hooks that function on x86-64 and answers the polygons that are
+  wholly inside or wholly past an edge itself (pixel-identical captures with it on and off; 172 to 175
+  fps on a 175 Hz display). `TL_PVZ2_NO_CLIP_SHORTCUT=1` turns it off.
 
 ## Pointer overlay measurements
 

@@ -76,6 +76,7 @@
 void *tl_jni_native_host(const char *cls, const char *name, const char *sig);
 #define tl_jni_native(c, n, s) tl_jni_native_host((c), (n), (s))
 #define GUEST_FN(p, sig) ((p) ? tl_x64_host_fn((uint64_t)(uintptr_t)(p), (sig)) : NULL)
+static void clip_shortcut_install(tl_lib *rfl);
 #else
 #define GUEST_FN(p, sig) ((void *)(p))
 #endif
@@ -696,12 +697,21 @@ static atomic_int g_plant_on_press;
 static uint64_t g_key_cursor_board, g_key_cursor;
 static uint32_t g_press_swallowed_id;
 static bool guest_key_cursor_pending(void);
+/* The board where a key's pick or shovel was just cancelled (issue #48), and how
+ * many event calls a lawn press has been held back since. */
+static uint64_t g_cancel_board;
+static int g_cancel_held;
+static bool guest_cancelled_cursor_listening(void);
 typedef struct { char text[64]; int action; double time_s; } pvz_text;
 typedef struct { int keycode, down; double time_s; } pvz_key;
 static struct {
     pvz_touch v[256];
     int n;
-    uint32_t next_id, active_id;
+    uint32_t active_id;
+    /* The ids that are down, one bit each (bit n = id n). */
+    uint32_t down;
+    /* Moves merged into a queued one since the last log line (issue #36). */
+    uint32_t merged;
     /* The guest's finger for each of the host's fingers. The Mac and Windows
      * have one finger (the mouse), but it can press again before a release has
      * gone out -- the shovel's tap is released 120 ms later, and the plant's
@@ -715,7 +725,7 @@ static struct {
      * not the other finger's. */
     int last_x[8], last_y[8];
     pthread_mutex_t mu;
-} TQ = { .next_id = 1, .active_id = 1, .mu = PTHREAD_MUTEX_INITIALIZER };
+} TQ = { .active_id = 1, .mu = PTHREAD_MUTEX_INITIALIZER };
 static struct {
     pvz_text v[32];
     int n;
@@ -736,16 +746,27 @@ static double now_s(void)
     return (double)t.tv_sec + (double)t.tv_nsec / 1000000000.0;
 }
 
+/* A touch's id is Android's: the finger's pointer index + 1, which is the lowest
+ * index no other finger holds (AndroidUIEventManager: ident = getPointerId() + 1). One
+ * finger, the mouse among them, is always 1. The mod's own code depends on it: the
+ * carnival hats (issue #44) took no tap while ids counted up with every press. */
 static uint32_t touch_id_for(int phase, int host_id)
 {
     int slot = (host_id >= 0 && host_id < 8) ? host_id : 0;
     if (phase != 0) {
         /* The move and the release belong to the finger that was pressed. */
-        if (TQ.finger[slot]) return TQ.finger[slot];
-        return TQ.active_id;
+        uint32_t id = TQ.finger[slot] ? TQ.finger[slot] : TQ.active_id;
+        if (phase == 3 || phase == 4) {
+            if (id < 32) TQ.down &= ~(1u << id);
+            TQ.finger[slot] = 0;
+        }
+        return id;
     }
-    uint32_t id = TQ.next_id++;
-    if (id == 0) id = TQ.next_id++;
+    /* A press on a finger that is still down (its release never came) frees that one first. */
+    if (TQ.finger[slot] && TQ.finger[slot] < 32) TQ.down &= ~(1u << TQ.finger[slot]);
+    uint32_t id = 1;
+    while (id < 31 && (TQ.down & (1u << id))) id++;
+    TQ.down |= 1u << id;
     TQ.finger[slot] = id;
     TQ.active_id = id;
     return id;
@@ -768,6 +789,22 @@ static void J_process_events(tl_jcall *c)
     while (TQ.n > 0 && used + 48 <= limit - 16) {
         pvz_touch t = TQ.v[0];
         bool complete = false;
+        if (t.phase == 0 && g_cancel_board) {
+            /* A cancelled key pick leaves its cursor listening for a frame or two.
+             * A press that reaches it first makes the game promote a pending cursor
+             * that is no longer there, and it dies (issue #48). The press waits
+             * until the game has let that cursor go. */
+            if (guest_cancelled_cursor_listening() && g_cancel_held < 60) {
+                if (g_cancel_held++ == 0)
+                    tl_log_line("pvz2: a press waits: the cancelled cursor is still listening");
+                break;
+            }
+            if (g_cancel_held)
+                tl_log_line("pvz2: the press goes on after %d call(s)%s", g_cancel_held,
+                            g_cancel_held >= 60 ? " (the cursor never went)" : "");
+            g_cancel_board = 0;
+            g_cancel_held = 0;
+        }
         if (t.phase == 0) {
             complete = atomic_load(&g_plant_on_press) && guest_key_cursor_pending();
             if (complete && used + 96 > limit - 16) break;
@@ -2728,6 +2765,9 @@ bool tl_pvz2_start(const tl_ga_config *cfg)
     else {
         tl_lib *rfl = load("libRFLib.so");
         if (rfl) tl_ld_init(rfl);
+#if defined(__x86_64__)
+        if (rfl) clip_shortcut_install(rfl);
+#endif
     }
     if (getenv("TL_PVZ2_PROBE")) {
         tl_ld_probe(game, 0x166bf4c, probe_changed);
@@ -2844,6 +2884,95 @@ static void *guest_find_widget(const char *name);
 static bool guest_anchored_rect(void *widget, int *out);
 static double guest_surface_scale(void);
 static void *guest_code(uint64_t guest_vaddr);
+
+#if defined(__x86_64__)
+/* The game's "draw a polygon trimmed to a rectangle" (libPVZ2 0x1762604: renderer, rect {x, y, w, h} as ints, polygon:
+ * up to 100 corners of 32 bytes inline, then the corners' pointer at +0xc80 and their count at +0xc88). It copies the
+ * corners and trims them against the left, top, right and bottom edges in four passes, copying every corner it keeps,
+ * then draws what is left as a triangle fan (0x1762190: renderer, 6, count - 2, corners, renderer+0x2c, +0x30). On
+ * x86-64 that is translated code and a host memcpy per kept corner: on the News page, which trims every picture of
+ * its list each frame, it held the game at about 41 fps on a fast PC. Most polygons are wholly inside or wholly
+ * past one edge; for those the result is known without the passes, and the shortcut gives it:
+ *   - inside: every corner has x >= left, y >= top, x < right, y < bottom (the passes' own tests: >= for the left
+ *     and top edges, < for the right and bottom ones). Each pass then keeps every corner, in order, unchanged, so the
+ *     game would draw exactly these corners: the shortcut draws them.
+ *   - past an edge: every corner left of the left edge (the first pass keeps none), or more than a pixel above the
+ *     top, right of the right or below the bottom (a corner an earlier pass makes is a blend of two such corners,
+ *     so it stays past that edge too; the pixel covers the blend's rounding). Nothing is drawn.
+ * Fewer than 3 corners draw nothing either way. Anything else (and NaNs, huge coordinates, an inverted rect) goes to
+ * the game's own code. TL_PVZ2_NO_CLIP_SHORTCUT=1 leaves the game's function alone. */
+#define GUEST_CLIP_DRAW_POLYGON 0x1762604
+#define GUEST_DRAW_PRIMITIVES   0x1762190
+typedef void (*clip_draw_fn)(void *, void *, void *);
+typedef void (*draw_prims_fn)(void *, int, int, void *, int, int);
+static clip_draw_fn g_clip_game;
+static draw_prims_fn g_draw_prims;
+static uint64_t g_clip_trampoline;
+static unsigned long long g_clip_n[3];   /* inside, past an edge, the game's code */
+
+static void clip_draw_shortcut(void *self, void *rect, void *poly)
+{
+    int32_t r[4], n = 0;
+    const uint8_t *v = NULL;
+    memcpy(r, rect, sizeof r);
+    memcpy(&v, (const uint8_t *)poly + 0xc80, sizeof v);
+    memcpy(&n, (const uint8_t *)poly + 0xc88, sizeof n);
+    int kind = 2;
+    if (n < 3) kind = 1;
+    else if (v && n <= 4096 && r[2] >= 0 && r[3] >= 0) {
+        const float L = (float)r[0], T = (float)r[1];
+        const float R = (float)(int32_t)((uint32_t)r[0] + (uint32_t)r[2]), B = (float)(int32_t)((uint32_t)r[1] + (uint32_t)r[3]);
+        bool inside = true, left = true, above = true, right = true, below = true, sane = true;
+        for (int32_t i = 0; i < n; i++) {
+            float x, y;
+            memcpy(&x, v + (size_t)i * 32, 4);
+            memcpy(&y, v + (size_t)i * 32 + 4, 4);
+            if (!(x > -1e6f && x < 1e6f && y > -1e6f && y < 1e6f)) { sane = false; break; }
+            if (!(x >= L && y >= T && x < R && y < B)) inside = false;
+            if (!(x < L)) left = false;
+            if (!(y < T - 1.0f)) above = false;
+            if (!(x >= R + 1.0f)) right = false;
+            if (!(y >= B + 1.0f)) below = false;
+        }
+        if (sane && inside) kind = 0;
+        else if (sane && (left || above || right || below)) kind = 1;
+    }
+    g_clip_n[kind]++;
+    if (kind == 0) {
+        int32_t a = 0, b = 0;
+        memcpy(&a, (const uint8_t *)self + 0x2c, 4);
+        memcpy(&b, (const uint8_t *)self + 0x30, 4);
+        g_draw_prims(self, 6, n - 2, (void *)v, a, b);
+    } else if (kind == 2) {
+        g_clip_game(self, rect, poly);
+    }
+    /* A line every 10 s while it is used: the News page alone trims about 50,000 polygons a frame */
+    if (((g_clip_n[0] + g_clip_n[1] + g_clip_n[2]) & 0xfff) == 0) {
+        static double last;
+        double now = now_s();
+        if (now - last >= 10.0) {
+            last = now;
+            tl_log_line("pvz2: trimmed polygons so far: %llu inside, %llu past an edge, %llu by the game's code",
+                        g_clip_n[0], g_clip_n[1], g_clip_n[2]);
+        }
+    }
+}
+
+static void clip_shortcut_install(tl_lib *rfl)
+{
+    if (getenv("TL_PVZ2_NO_CLIP_SHORTCUT")) { tl_log_line("pvz2: the polygon trimming shortcut is off"); return; }
+    typedef void (*hook_fn)(void *, void *, void *);
+    hook_fn hook = (hook_fn)GUEST_FN(tl_ld_sym(rfl, "A64HookFunction"), "vlll");
+    void *site = guest_code(GUEST_CLIP_DRAW_POLYGON), *draw = guest_code(GUEST_DRAW_PRIMITIVES);
+    uint64_t mine = tl_x64_export("pvz2 polygon trimming shortcut", (void *)clip_draw_shortcut, "vlll");
+    if (!hook || !site || !draw || !mine) { tl_log_line("pvz2: the polygon trimming shortcut is not installed"); return; }
+    g_draw_prims = (draw_prims_fn)GUEST_FN(draw, "vliilii");
+    hook(site, (void *)(uintptr_t)mine, &g_clip_trampoline);
+    if (!g_clip_trampoline) { tl_log_line("pvz2: A64HookFunction gave no way back to the game's trimming"); return; }
+    g_clip_game = (clip_draw_fn)GUEST_FN((void *)(uintptr_t)g_clip_trampoline, "vlll");
+    tl_log_line("pvz2: the polygon trimming shortcut is in (game code at %#llx)", (unsigned long long)g_clip_trampoline);
+}
+#endif
 /* The seed tray and the shovel, in the surface's own space, and where they came
  * from. The host asks for a shortcut's position; this is what it answers with. */
 static int g_tray[4];              /* x, y, w, h -- the surface's space */
@@ -3794,6 +3923,12 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
         tl_log_line("pvz2: %s: the new cursor is another class (vtable %p, want %p); released the same way",
                     what, (void *)vtable, want_vtable);
     }
+    /* +0x20 is the cursor's own "finished" mark (the game's removal, guest 0x760f6c, sets
+     * it first). An item that acts on its own press -- the Roman Piñata items that send
+     * troops at once (issue #49) -- has already finished its cursor here. A tap on its
+     * packet still releases it the same way, so the key does too, but nothing is held. */
+    uint8_t finished = 0;
+    guest_read_bytes(cursor + 0x20, &finished, sizeof finished);
     void *release = guest_code(GUEST_CURSOR_RELEASE);
     bool call_ok = false;
     guest_call2(release, cursor, 0, &call_ok);
@@ -3811,6 +3946,8 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
     }
     if (!pending) {
         tl_log_line("pvz2: %s: the guest cancelled it (no pending cursor)", what);
+        g_cancel_board = board;
+        g_cancel_held = 0;
         return 0;
     }
     if (pending != cursor) {
@@ -3818,11 +3955,40 @@ static int guest_release_new_cursor(const char *what, uint64_t board,
                     what, (void *)pending, (void *)cursor);
         return -1;
     }
+    if (finished) {
+        tl_log_line("pvz2: %s: the item acted on its own press; nothing is held", what);
+        return 0;
+    }
     g_key_cursor_board = board;
     g_key_cursor = cursor;
     tl_log_line("pvz2: %s: the cursor %p is pending, waiting for the player's click",
                 what, (void *)cursor);
     return 1;
+}
+
+/* True while a press would reach a cursor the game has not bound to a finger
+ * (+0x30, the touch id, is 0) with no pending cursor on the board: that cursor's
+ * pointer-down (guest 0x760a98) binds itself and calls abc738, which promotes the
+ * pending cursor at board+0x408 -- null -- and the game dies at abc764. A key's
+ * cancelled pick leaves its cursor in the board's active vector like that until
+ * the board's next update removes it. */
+static bool guest_cancelled_cursor_listening(void)
+{
+    bool ok = false;
+    uint64_t board = guest_call2(guest_code(GUEST_BOARD_GETTER), 0, 0, &ok);
+    if (!ok || !board || board != g_cancel_board) return false;
+    uint64_t pending = 0, begin = 0, end = 0;
+    if (!guest_read_bytes(board + 0x408, &pending, sizeof pending) || pending) return false;
+    if (!guest_read_bytes(board + 0x3f0, &begin, sizeof begin) ||
+        !guest_read_bytes(board + 0x3f8, &end, sizeof end) ||
+        !begin || end < begin || (end - begin) % 8 || end - begin > 64 * 8) return false;
+    for (uint64_t p = begin; p < end; p += 8) {
+        uint64_t cursor = 0, token = 1;
+        if (guest_read_bytes(p, &cursor, sizeof cursor) && cursor &&
+            guest_read_bytes(cursor + 0x30, &token, sizeof token) && !token)
+            return true;
+    }
+    return false;
 }
 
 static bool guest_key_cursor_pending(void)
@@ -5092,6 +5258,9 @@ static atomic_uint_fast64_t g_cursor_target;
 static uint64_t g_cursor_board, g_cursor_pending, g_cursor_parent;
 static int g_cursor_kind;
 static char g_cursor_plant[64];
+/* The held card aims rather than plants: its cursor plays the game's target reticle (the
+ * Roman Piñata items, issue #49), and a click anywhere on the lawn uses it. */
+static bool g_cursor_aim;
 
 /* The native cursor initializes this service on its first validity query. */
 static uint64_t guest_cursor_placement_service(void)
@@ -5155,6 +5324,13 @@ static void guest_cursor_placement(tl_pvz2_cursor_snapshot *geometry, uint64_t b
     int y = (int)(uint32_t)target - 1;
     int col = tl_cursor_grid_axis(geometry, 0, x), row = tl_cursor_grid_axis(geometry, 1, y);
     if (col < 0 || col >= geometry->columns || row < 0 || row >= geometry->rows) {
+        last_board = last_pending = 0; known = 0;
+        return;
+    }
+    if (g_cursor_aim) {
+        /* An aimed item takes any tile of the lawn: the game asks no plant question. */
+        geometry->placement_known = geometry->placement_allowed = 1;
+        geometry->placement_col = col; geometry->placement_row = row;
         last_board = last_pending = 0; known = 0;
         return;
     }
@@ -5250,11 +5426,13 @@ static void guest_cursor_update(void)
         g_cursor_board = g_cursor_pending = g_cursor_parent = 0;
         g_cursor_kind = TL_PVZ2_CURSOR_NONE;
         g_cursor_plant[0] = 0;
+        g_cursor_aim = false;
     }
     if (!atomic_load(&g_cursor_enabled)) {
         g_cursor_board = g_cursor_pending = g_cursor_parent = 0;
         g_cursor_kind = TL_PVZ2_CURSOR_NONE;
         g_cursor_plant[0] = 0;
+        g_cursor_aim = false;
         if (stats_enabled) {
             static double total, worst;
             static unsigned frames;
@@ -5271,11 +5449,16 @@ static void guest_cursor_update(void)
     double started = now_s();
     uint64_t pending = 0, vt = 0;
     uint64_t board = guest_cursor_live_probe(&pending, &vt);
+    /* A finished cursor (+0x20) is one whose item already acted -- the Roman items that send
+     * troops on their own press leave theirs pending after a tap (issue #49): nothing to show. */
+    uint8_t finished = 0;
+    if (pending && guest_read_bytes(pending + 0x20, &finished, sizeof finished) && finished) pending = 0;
     if (board != g_cursor_board || pending != g_cursor_pending) {
         g_cursor_board = board;
         g_cursor_pending = pending;
         g_cursor_parent = 0;
         g_cursor_kind = TL_PVZ2_CURSOR_NONE;
+        g_cursor_aim = false;
         memset(g_cursor_plant, 0, sizeof g_cursor_plant);
         if (pending && vt == (uint64_t)(uintptr_t)tl_aot_guest_data_ptr_any(0x24d8b60)) {
             g_cursor_kind = TL_PVZ2_CURSOR_SHOVEL;
@@ -5302,10 +5485,21 @@ static void guest_cursor_update(void)
             uint64_t registry = guest_call2(guest_code(GUEST_UI_REGISTRY), 0, 0, &ok);
             uint64_t packet = ok && registry
                 ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x38), &ok) : 0;
+            /* The plant's name, in either of libc++'s forms: the Roman items of the 1.5.0 mod
+             * have long ones ("zoybeanpod_miniboss_attack_melee", issue #49). */
             if (ok && packet && guest_std_string(packet + 0x1a8, g_cursor_plant, sizeof g_cursor_plant)) {
                 g_cursor_kind = TL_PVZ2_CURSOR_PLANT;
+                /* The cursor's animation (+0x28) and what it plays (+0x38): a plant plays its
+                 * own "idle"; an aimed item plays the reticle the game draws while it aims. */
+                uint64_t rig = 0;
+                char playing[32] = { 0 };
+                g_cursor_aim = guest_read_bytes(pending + 0x28, &rig, sizeof rig) && rig &&
+                               guest_std_string(rig + 0x38, playing, sizeof playing) &&
+                               !strcmp(playing, "banana_lock_recticle");
                 uint64_t image = registry ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(pending + 0x40), &ok) : 0;
                 g_cursor_parent = ok && image ? guest_collectable_from_ref(registry, (uint64_t *)(uintptr_t)(image + 0x68), &ok) : 0;
+            } else {
+                memset(g_cursor_plant, 0, sizeof g_cursor_plant);
             }
         }
     }
@@ -5360,8 +5554,9 @@ static void guest_cursor_update(void)
         static uint64_t last_pending;
         if (pending != last_pending) {
             last_pending = pending;
-            if (pending) tl_log_line("pvz2: cursor probe: plant %s kind %d row_offset %.2f valid %d",
-                                     g_cursor_plant, g_cursor_kind, geometry.row_offset, geometry.grid_valid);
+            if (pending) tl_log_line("pvz2: cursor probe: plant %s kind %d%s row_offset %.2f valid %d",
+                                     g_cursor_plant, g_cursor_kind, g_cursor_aim ? " (aims)" : "",
+                                     geometry.row_offset, geometry.grid_valid);
         }
     }
     pthread_mutex_lock(&g_cursor_lock);
@@ -6163,6 +6358,23 @@ void tl_pvz2_touch(int phase, int id, float x, float y)
 {
     (void)id;
     pthread_mutex_lock(&TQ.mu);
+    /* Moves the game has not taken yet merge into one, the way Android hands the game
+     * one move per finger per frame. A 1000 Hz mouse otherwise queues dozens of moves
+     * a frame, and the seed picker's scroll does its work for each (issue #36). The
+     * merged move keeps the first one's previous point and takes the newest point. */
+    if (phase == 1 && TQ.n > 0) {
+        int slot = (id >= 0 && id < 8) ? id : 0;
+        pvz_touch *last = &TQ.v[TQ.n - 1];
+        if (last->phase == 1 && last->id == touch_id_for(1, id)) {
+            last->x = (int)(x + 0.5f);
+            last->y = (int)(y + 0.5f);
+            last->time_s = now_s();
+            TQ.last_x[slot] = last->x; TQ.last_y[slot] = last->y;
+            TQ.merged++;
+            pthread_mutex_unlock(&TQ.mu);
+            return;
+        }
+    }
     if (TQ.n == (int)(sizeof(TQ.v) / sizeof(TQ.v[0]))) {
         memmove(&TQ.v[0], &TQ.v[1], (sizeof(TQ.v) / sizeof(TQ.v[0]) - 1) * sizeof(TQ.v[0]));
         TQ.n--;
@@ -6177,6 +6389,10 @@ void tl_pvz2_touch(int phase, int id, float x, float y)
     if (phase == 0) { t->px = t->x; t->py = t->y; }
     else { t->px = TQ.last_x[slot]; t->py = TQ.last_y[slot]; }
     TQ.last_x[slot] = t->x; TQ.last_y[slot] = t->y;
+    if (TQ.merged && phase != 1) {
+        tl_log_line("pvz2: touch id %u: %u move(s) merged while the game had not taken the last one", t->id, TQ.merged);
+        TQ.merged = 0;
+    }
     tl_log_line("pvz2: touch phase %d id %u at (%d,%d), queued %d", t->phase, t->id, t->x, t->y, TQ.n);
     pthread_mutex_unlock(&TQ.mu);
 }

@@ -40,9 +40,12 @@ through a guard that turns a fault into a log line instead of a crash.
 | packet vtable +0x90 | the packet's own pointer-down handler (vtables: SeedPacket 0x24b2940, SeedPacket_Tool 0x23af1f0 (conveyor tools, #46), HarvestableBoostPacket 0x24bbfd0; SeedPacket_Powerup 0x23c4760 is left out) | the pick itself |
 | 0x761074 | the game's release decision for a new cursor (PlantCursor vtable 0x2491a60) | a second press cancels, like a second tap |
 | board +0x408 | pending cursor; null when no item is held | read-only selection state |
+| board +0x3f0..+0x3f8, cursor +0x30 | the active cursor vector, and the touch id a cursor is bound to (0: none) | a press waits while an unbound cursor is in the vector and nothing is pending (#48, below) |
 | cursor vtables 0x2491a60, 0x24d8b60 | plant and shovel cursors, respectively | distinguish held plants from the shovel |
 | cursor vtable 0x24896c0 | ToolPacketCursor: a conveyor's tool packet in hand (a PacketCursor like PlantCursor, packet reference at +0x38; the packet's +0x1a8 is the tool's name, e.g. `tool_projectile_bowlingbulb3`, in libc++'s long form) | the preview's TOOL kind, picture `IMAGE_UI_PACKETS_TOOLS_...` (#46) |
-| plant cursor +0x38, packet +0x1a8 | managed reference to the packet, and its libc++ TypeName string | identify the held plant |
+| plant cursor +0x38, packet +0x1a8 | managed reference to the packet, and its libc++ TypeName string, short or long form (names of 23 letters or more, like the Roman items' `zoybeanpod_miniboss_attack_melee`, are long: #49) | identify the held plant |
+| cursor +0x20 | the cursor's "finished" mark, set first by the game's removal (0x760f6c) | an item that acts on its own press (the Roman Piñata items that send troops, #49) has finished its cursor right after the press: the key releases it like a tap does but holds nothing, and the preview shows nothing |
+| plant cursor +0x28, then +0x38 | the cursor's animation and what it plays: a plant (the game's or the mod's) plays `idle`; an item that aims plays the game's reticle `banana_lock_recticle` | an aiming item's crosshair takes any lawn tile, without the plant placement question |
 | 0x13ab0a0, vtable 0x24d8b60 | the shovel's pointer-down, and the shovel cursor | S |
 | 0x11beef0, 0x14ea3cc / 0x14ea364 / 0x14ea3b0 / 0x14ea1fc | the iterator over the board's collectables (pool 0x48) | Space |
 | 0x64f998 | a collectable's own "clicked" request (the game picks the flight and awards the value) | Space collects suns (vtable 0x2395208), real coins (0x23bb9b8), gems (0x2399d48), plant food (0x24250b8) and sprouts (0x24d5ce0) only; fake coins (0x23bbc18) and rewards are not accepted |
@@ -53,6 +56,12 @@ through a guard that turns a fault into a log line instead of a crash.
 | 0x249dfa0, +0x90 = 0x1162138 | PowerupTimeUI's vtable and its pointer-down (selects the power-up) | Z, X, C (`UIPowerupHolder`, buttons named `UIPowerup`; 73 px wide, 98 apart, holder 308 wide for three) |
 | 0x24bcf00 | the pause menu (`PauseDialog`); its rect is at +0x44 | Escape on the pause menu taps RESUME (82% across, 90% down) |
 
+- **A cancelled key pick keeps listening for a frame.** The second press of the same key
+  cancels, but the cancelled cursor stays in the active vector, unbound, until the board's next
+  update. A press that reaches it first runs its pointer-down (0x760a98), which binds itself and
+  calls 0xabc738 to promote the pending cursor; that is null, so the game dies at 0xabc764
+  (issue #48: a key and a click in the same frame). The host holds that press back until the
+  cursor is gone, one call in the tests.
 - **Android's Back does nothing in a level** in this game, so Escape presses the pause button
   instead (and RESUME on the pause menu). Elsewhere it is Back.
 - **Space's exact vtables are what keep rewards out.** Gems, plant food and sprouts share the
@@ -186,6 +195,32 @@ returns.
   enables snapshot work and the overlay; GameController's keyboard disconnect disables both until
   another press. A Universal Control keyboard sends no disconnect (tried on iPadOS 27: GameController
   still reports a keyboard afterwards), so the labels stay until the app restarts.
+
+## Touch IDs
+
+A touch record's id is Android's: the finger's pointer index + 1 (`AndroidUIEventManager`:
+`ident = getPointerId() + 1`), so one finger, the mouse among them, is always 1, and a second
+finger held at the same time is 2. The driver gives each press the lowest id no finger holds
+(`touch_id_for`). The mod's own code depends on it: the carnival minigame's hats (Caliginous
+Carnival, issue #44) took no tap while the ids counted up with every press, and took the odd
+one after a restart, when they were low again.
+
+Moves are merged the way Android batches them: a move that arrives while the game has not yet
+taken the finger's last queued move replaces that move's point (the first one's previous point
+stays). A 1000 Hz mouse otherwise put 14 to 60 moves into each frame, and the seed picker's scroll
+works per move, which on a translated x64 PC dropped it to about 40 fps (issue #36). On the Mac
+with a 1000 Hz test drag: 11002 moves reached the game before, about one per frame after.
+
+## Block sizes
+
+The game writes one byte past the end of a 664-byte animated object (a `PopAnimRig` at +0x10) as
+Holiday Mashup's levels start. Android's allocator makes that a 768-byte block and the Mac's a
+672-byte one, so the byte lands in slack. Windows' heap keeps its own header right after an
+exact-size block, so the byte damaged it and a later free closed the game without a word
+(0xc0000374, issue #45). `tl_malloc` on Windows (runtime/win/tl-win-compat.c) now rounds to
+Android-like size classes: 16-byte steps to 128, four classes per doubling to 64 KiB, whole pages
+past that. A guard build (a canary after each block, freed blocks held back and checked) found
+nothing else written past an end in Holiday Mashup Day 3.
 
 ## Generated IDs
 
@@ -360,6 +395,17 @@ The runtime's made-up `/proc/meminfo` and `/proc/self/status` are not what it sh
 - `Resources_GetAssetFileSize` must return -1 for a missing asset (0 hangs start-up).
 - The game's ContentDownloader reads the CDN archive through zlib's `gz*` functions. The
   archive is gzip despite its `.tar` suffix; the HTTP bridge must pass its bytes unchanged.
+- **Drawing a polygon trimmed to a rectangle** (0x1762604: renderer, rect `{x, y, w, h}` as ints,
+  polygon with up to 100 corners of 32 bytes inline, the corners' pointer at +0xc80 and their count at
+  +0xc88; x at +0, y at +4). It copies the corners and trims them against the left, top, right and
+  bottom edges in four passes (0x1762a54 for the left and top edges, inside is `>=`; 0x17631ec for the
+  right and bottom ones, inside is `<`; a side with both corners inside keeps its second corner, so a
+  polygon wholly inside comes out unchanged and in order), then draws what is left as a triangle fan
+  (0x1762190: renderer, 6, count - 2, corners, renderer+0x2c, +0x30). The News page calls it about
+  50,000 times a frame (the whole news text, mostly outside the box): on ARM that holds 60 fps, but
+  translated on x86-64 it held the page near 41 fps. The x86-64 driver hooks it and draws wholly-inside
+  polygons and skips wholly-outside ones itself (runtime/win/README.md, "Where the x64 build spends
+  its time"). The mod hooks neither function.
 
 Android's package metadata in the pinned APK is version code `675`, version name `1.4.0` (separate
 from the mod's `VERSION`). File-system resource getters return block count, available blocks and

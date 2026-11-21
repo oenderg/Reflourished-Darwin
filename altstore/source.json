@@ -20,6 +20,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.5",
+          "buildVersion": "10505",
+          "date": "2026-11-20",
+          "localizedDescription": "Reflourished 1.5.5. The carnival hats, two crashes and a choppy seed picker.\n\n• The hats in the Caliginous Carnival take a tap or click again; before, they mostly ignored it.\n• Windows: fixed the game closing by itself during some levels, most often after Retry on the loss screen (Holiday Mashup Day 3 was one).\n• Mac and Windows: fixed a crash when you pressed a seed's key again to put it back and clicked the lawn at the same moment.\n• Mac and Windows: a gaming mouse that reports its position very often no longer floods the game with movements, which could make the Select your Seeds screen choppy on some PCs.",
+          "downloadURL": "https://github.com/oenderg/Reflourished-Darwin/releases/download/v1.5.5/PvZ2-Reflourished-1.5.0-Darwin-1.5.5-iOS.ipa",
+          "size": 55098155,
+          "minOSVersion": "15.5"
+        },
+        {
           "version": "1.5.4",
           "buildVersion": "10504",
           "date": "2026-11-19",

@@ -1,0 +1,29 @@
+name: Port requests
+
+# A port request (the "Port request" issue form, which sets its label) gets a thank-you and is closed
+# right away: new ports start only once the current ones are stable. The request stays searchable.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  answer:
+    name: Answer the port request
+    if: contains(github.event.issue.labels.*.name, 'port request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          cat > reply.md <<'EOF'
+          Thanks for the request! Right now I'm working on Reflourished and AltVerZ, and I'll only start on a new port once those are in a stable state, so I'm closing this for now.
+
+          It stays on the list though: when I pick the next port, I'll look through these requests, and a 👍 on a request helps me see which mods people want most.
+          EOF
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file reply.md
+          gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned"

@@ -1,0 +1,29 @@
+name: Port request
+description: Ask for another PvZ2 mod on iPhone, iPad, Mac or Windows
+labels: [port request]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for thinking of a new port! I start a new one only once the ports I am working on are stable, so this request is closed right after you open it. It stays on the list, and I look through the list when I pick the next port.
+  - type: input
+    id: mod
+    attributes:
+      label: Which mod
+      description: Its name, and a link to its page or its Discord if you have one.
+      placeholder: e.g. PvZ2 Shuttle
+    validations:
+      required: true
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Where you would play it
+      options:
+        - label: iPhone or iPad
+        - label: Mac
+        - label: Windows
+  - type: textarea
+    id: why
+    attributes:
+      label: Anything else
+      description: Why you would like this mod in particular, or anything I should know about it.
