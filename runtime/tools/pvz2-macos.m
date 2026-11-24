@@ -99,6 +99,7 @@ static char g_apk[1024], g_data[1024], g_egl[1024], g_gles[1024];
 - (void)cursorSettingChanged;
 - (void)badgeTick:(NSTimer *)timer;
 - (void)refreshBadges:(BOOL)force;
+- (void)updateGameCursor;
 @end
 static PVZ2View *g_view;
 static NSWindow *g_window;
@@ -2023,6 +2024,104 @@ static bool g_cursor_art_loading;
 static void cursor_preview_tick(void);
 static void cursor_load_art(void);
 
+static NSCursor *g_game_cursor;
+static double g_game_cursor_h;
+
+/* Draw a high-contrast white pointer with a black outline and soft shadow so
+ * it stays easy to spot on busy lawns. */
+static NSImage *create_pvz2_cursor_image(double width, double height, NSPoint *out_hotspot)
+{
+    if (width < 16.0) width = 16.0;
+    if (height < 20.0) height = 20.0;
+
+    double tx = width * 0.09;
+    double ty = height * 0.07;
+    NSPoint hotSpot = NSMakePoint(tx, ty);
+    if (out_hotspot) *out_hotspot = hotSpot;
+
+    NSSize imageSize = NSMakeSize(width, height);
+    NSImage *image = [NSImage imageWithSize:imageSize flipped:YES drawingHandler:^BOOL(NSRect dstRect) {
+        CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
+        if (!ctx) return NO;
+
+        CGContextSaveGState(ctx);
+
+        double w = dstRect.size.width;
+        double h = dstRect.size.height;
+
+        CGContextSaveGState(ctx);
+        CGContextSetShadowWithColor(ctx, CGSizeMake(fmax(1.0, w * 0.04), fmax(1.5, h * 0.05)), fmax(2.0, w * 0.08),
+            [NSColor colorWithCalibratedWhite:0.0 alpha:0.35].CGColor);
+
+        NSBezierPath *path = [NSBezierPath bezierPath];
+
+        NSPoint p_tip        = NSMakePoint(w * 0.09, h * 0.07);
+        NSPoint p_head_left  = NSMakePoint(w * 0.09, h * 0.72);
+        NSPoint p_crotch_l   = NSMakePoint(w * 0.38, h * 0.52);
+        NSPoint p_tail_l     = NSMakePoint(w * 0.60, h * 0.90);
+        NSPoint p_tail_r     = NSMakePoint(w * 0.76, h * 0.82);
+        NSPoint p_crotch_r   = NSMakePoint(w * 0.54, h * 0.52);
+        NSPoint p_right_barb = NSMakePoint(w * 0.82, h * 0.52);
+
+        [path moveToPoint:NSMakePoint(p_tip.x, p_tip.y + h * 0.04)];
+        [path curveToPoint:NSMakePoint(p_tip.x + w * 0.05, p_tip.y)
+             controlPoint1:NSMakePoint(p_tip.x, p_tip.y - h * 0.015)
+             controlPoint2:NSMakePoint(p_tip.x + w * 0.02, p_tip.y - h * 0.015)];
+        [path curveToPoint:NSMakePoint(p_right_barb.x - w * 0.03, p_right_barb.y - h * 0.03)
+             controlPoint1:NSMakePoint(w * 0.38, h * 0.20)
+             controlPoint2:NSMakePoint(w * 0.66, h * 0.36)];
+        [path curveToPoint:NSMakePoint(p_right_barb.x - w * 0.04, p_right_barb.y + h * 0.02)
+             controlPoint1:NSMakePoint(p_right_barb.x + w * 0.02, p_right_barb.y)
+             controlPoint2:NSMakePoint(p_right_barb.x + w * 0.01, p_right_barb.y + h * 0.02)];
+        [path curveToPoint:NSMakePoint(p_crotch_r.x + w * 0.02, p_crotch_r.y)
+             controlPoint1:NSMakePoint(w * 0.70, h * 0.53)
+             controlPoint2:NSMakePoint(w * 0.60, h * 0.52)];
+        [path curveToPoint:NSMakePoint(p_tail_r.x - w * 0.01, p_tail_r.y - h * 0.02)
+             controlPoint1:NSMakePoint(w * 0.60, h * 0.62)
+             controlPoint2:NSMakePoint(w * 0.70, h * 0.72)];
+        [path curveToPoint:NSMakePoint(p_tail_l.x + w * 0.02, p_tail_l.y)
+             controlPoint1:NSMakePoint(p_tail_r.x + w * 0.02, p_tail_r.y + h * 0.035)
+             controlPoint2:NSMakePoint(p_tail_l.x + w * 0.05, p_tail_l.y + h * 0.035)];
+        [path curveToPoint:NSMakePoint(p_crotch_l.x + w * 0.01, p_crotch_l.y + h * 0.02)
+             controlPoint1:NSMakePoint(w * 0.52, h * 0.78)
+             controlPoint2:NSMakePoint(w * 0.42, h * 0.64)];
+        [path curveToPoint:NSMakePoint(p_head_left.x + w * 0.04, p_head_left.y - h * 0.01)
+             controlPoint1:NSMakePoint(w * 0.28, h * 0.58)
+             controlPoint2:NSMakePoint(w * 0.18, h * 0.66)];
+        [path curveToPoint:NSMakePoint(p_head_left.x, p_head_left.y - h * 0.04)
+             controlPoint1:NSMakePoint(p_head_left.x - w * 0.02, p_head_left.y)
+             controlPoint2:NSMakePoint(p_head_left.x - w * 0.02, p_head_left.y - h * 0.02)];
+        [path curveToPoint:NSMakePoint(p_tip.x, p_tip.y + h * 0.04)
+             controlPoint1:NSMakePoint(w * 0.07, h * 0.50)
+             controlPoint2:NSMakePoint(w * 0.07, h * 0.25)];
+        [path closePath];
+
+        NSColor *blackBorder = [NSColor colorWithCalibratedWhite:0.0 alpha:1.0];
+        [blackBorder setStroke];
+        path.lineWidth = fmax(2.0, w * 0.08);
+        path.lineJoinStyle = NSLineJoinStyleRound;
+        path.lineCapStyle = NSLineCapStyleRound;
+        [path stroke];
+        CGContextRestoreGState(ctx);
+
+        CGContextSaveGState(ctx);
+        [[NSColor colorWithCalibratedWhite:1.0 alpha:1.0] setFill];
+        [path fill];
+        CGContextRestoreGState(ctx);
+
+        [blackBorder setStroke];
+        path.lineWidth = fmax(1.8, w * 0.07);
+        path.lineJoinStyle = NSLineJoinStyleRound;
+        path.lineCapStyle = NSLineCapStyleRound;
+        [path stroke];
+
+        CGContextRestoreGState(ctx);
+        return YES;
+    }];
+
+    return image;
+}
+
 static NSString *badge_key_text(NSString *key)
 {
     if (!key.length || [key isEqualToString:@"None"]) return nil;
@@ -2167,14 +2266,58 @@ static double host_now(void)
 @implementation PVZ2View
 - (BOOL)isFlipped { return YES; }
 
+- (void)resetCursorRects
+{
+    [super resetCursorRects];
+    if (g_game_cursor) [self addCursorRect:self.bounds cursor:g_game_cursor];
+}
+
+- (void)cursorUpdate:(NSEvent *)event
+{
+    (void)event;
+    if (g_game_cursor) [g_game_cursor set];
+}
+
 - (void)updateTrackingAreas
 {
     if (self.cursorTracking) [self removeTrackingArea:self.cursorTracking];
     self.cursorTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
-        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+        options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingCursorUpdate | NSTrackingActiveAlways | NSTrackingInVisibleRect
         owner:self userInfo:nil];
     [self addTrackingArea:self.cursorTracking];
     [super updateTrackingAreas];
+}
+
+- (void)updateGameCursor
+{
+    NSRect b = self.bounds;
+    if (b.size.width <= 0 || b.size.height <= 0) return;
+
+    double vx = 0, vy = 0, vw = 0, vh = 0;
+    int sw = atomic_load(&g_surface_w), sh = atomic_load(&g_surface_h);
+    double ref_h = b.size.height;
+    if (tl_viewport_fit(b.size.width, b.size.height, sw > 0 ? sw : g_layout_w, sh > 0 ? sh : g_layout_h, &vx, &vy, &vw, &vh) && vh > 0.0) {
+        ref_h = vh;
+    }
+
+    double target_h = round(ref_h * 0.078);
+    if (target_h < 24.0) target_h = 24.0;
+    if (target_h > 96.0) target_h = 96.0;
+    double target_w = round(target_h * 0.75);
+
+    if (g_game_cursor && fabs(g_game_cursor_h - target_h) < 0.5) return;
+
+    NSPoint hotSpot = NSZeroPoint;
+    NSImage *img = create_pvz2_cursor_image(target_w, target_h, &hotSpot);
+    if (!img) return;
+
+    g_game_cursor = [[NSCursor alloc] initWithImage:img hotSpot:hotSpot];
+    g_game_cursor_h = target_h;
+
+    [self.window invalidateCursorRectsForView:self];
+    if (g_cursor_event_inside) {
+        [g_game_cursor set];
+    }
 }
 
 - (void)mouseMoved:(NSEvent *)event
@@ -2182,10 +2325,14 @@ static double host_now(void)
     g_cursor_event_point = [self convertPoint:event.locationInWindow fromView:nil];
     g_cursor_event_known = true;
     g_cursor_event_inside = NSPointInRect(g_cursor_event_point, self.bounds);
+    if (g_cursor_event_inside && g_game_cursor && [NSCursor currentCursor] != g_game_cursor) {
+        [g_game_cursor set];
+    }
 }
 
 - (void)mouseEntered:(NSEvent *)event
 {
+    if (g_game_cursor) [g_game_cursor set];
     [self mouseMoved:event];
 }
 
@@ -2194,6 +2341,7 @@ static double host_now(void)
     (void)event;
     g_cursor_event_known = true;
     g_cursor_event_inside = false;
+    [[NSCursor arrowCursor] set];
 }
 
 - (void)cursorSettingChanged
@@ -2282,6 +2430,7 @@ static double host_now(void)
     /* The same bounds, so the badges use the fit that was just applied: during
      * a live drag the game is only scaled, and this is the scale it got. */
     [self refreshBadges:YES];
+    [self updateGameCursor];
 }
 
 /* The setting, the labels and the driver's switch, together. Called at start
@@ -2552,13 +2701,17 @@ static NSButton *round_button(NSString *symbol, NSString *tip, SEL action, NSVie
     tl_pvz2_touch(phase, 1, gx, gy);
 }
 - (void)mouseDown:(NSEvent *)event {
+    if (g_game_cursor) [g_game_cursor set];
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     tl_log_line("macos: the mouse pressed at (%.0f,%.0f) in the window", p.x, p.y);
     [self touch:0 event:event];
 }
 - (void)mouseDragged:(NSEvent *)event { [self mouseMoved:event]; [self touch:1 event:event]; }
 - (void)mouseUp:(NSEvent *)event { [self touch:3 event:event]; }
-- (void)rightMouseDown:(NSEvent *)event { [self touch:0 event:event]; }
+- (void)rightMouseDown:(NSEvent *)event {
+    if (g_game_cursor) [g_game_cursor set];
+    [self touch:0 event:event];
+}
 - (void)rightMouseDragged:(NSEvent *)event { [self mouseMoved:event]; [self touch:1 event:event]; }
 - (void)rightMouseUp:(NSEvent *)event { [self touch:3 event:event]; }
 
