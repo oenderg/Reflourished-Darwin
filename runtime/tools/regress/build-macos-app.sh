@@ -84,7 +84,7 @@ echo "==> compiling the host and the translation layer"
 . "$R/tools/regress/pvz2-sources.sh"
 # Discord's Rich Presence is shared with the Windows host: one protocol file and
 # one transport per platform. It is not in pvz2-sources.sh, so iOS builds none of it.
-SRCS="$R/tools/pvz2-macos.m $R/tools/pvz2-cursor-art.m $R/tools/pvz2-discord.c $R/tools/pvz2-discord-macos.c $R/tools/vendor/zstd/zstddeclib.c $(pvz2_runtime_sources | tr '\n' ' ')"
+SRCS="$R/tools/pvz2-macos.m $R/tools/pvz2-cursor-art.m $R/tools/pvz2-cursor-texture.mm $R/tools/pvz2-discord.c $R/tools/pvz2-discord-macos.c $R/tools/vendor/zstd/zstddeclib.c $(pvz2_runtime_sources | tr '\n' ' ')"
 # The settings window is SwiftUI: one Swift file, compiled to an object and linked
 # with the rest (the Swift runtime is the system's own).
 SWIFT_OBJ="$(mktemp -d)/settings.o"

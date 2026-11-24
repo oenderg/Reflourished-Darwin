@@ -5257,7 +5257,7 @@ static tl_pvz2_cursor_snapshot g_cursor_published;
 static atomic_uint_fast64_t g_cursor_target;
 static uint64_t g_cursor_board, g_cursor_pending, g_cursor_parent;
 static int g_cursor_kind;
-static char g_cursor_plant[48];
+static char g_cursor_plant[64];
 /* The held card aims rather than plants: its cursor plays the game's target reticle (the
  * Roman Piñata items, issue #49), and a click anywhere on the lawn uses it. */
 static bool g_cursor_aim;
