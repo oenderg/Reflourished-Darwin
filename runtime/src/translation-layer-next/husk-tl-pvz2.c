@@ -775,6 +775,14 @@ static uint32_t touch_id_for(int phase, int host_id)
 static void J_process_events(tl_jcall *c)
 {
     static int calls;
+    /* The game calls this in a loop until it gets nothing, once a frame. A drain is
+     * one such loop. Each finger gets at most one move a drain, as Android hands the
+     * game its input once a frame: with a fast mouse (8000 Hz) and a screen whose
+     * moves cost the game time (the seed picker), a new move was always waiting by
+     * the next call, so the loop and the frame went on and moves never merged
+     * (issue #36). A second move waits for the next frame and merges there. */
+    static bool drain;
+    static uint32_t drain_moved;
     jobj *b = c->args[0].l;
     void *addr = b ? tl_jni_get_field(b, "address", "J").l : NULL;
     int64_t cap = b ? tl_jni_get_field(b, "capacity", "J").j : 0;
@@ -786,6 +794,7 @@ static void J_process_events(tl_jcall *c)
     uint32_t count = 0;
     size_t used = 0;
     pthread_mutex_lock(&TQ.mu);
+    if (!drain) { drain = true; drain_moved = 0; }
     while (TQ.n > 0 && used + 48 <= limit - 16) {
         pvz_touch t = TQ.v[0];
         bool complete = false;
@@ -820,6 +829,11 @@ static void J_process_events(tl_jcall *c)
         if (t.phase == 0 && getenv("TL_PVZ2_CURSOR_CHECK")) {
             g_cursor_check_down = t;
             g_cursor_check_queued = true;
+        }
+        if (t.phase == 1 && t.id < 32) {
+            /* Everything behind a waiting move waits too, so the order holds. */
+            if (drain_moved & (1u << t.id)) break;
+            drain_moved |= 1u << t.id;
         }
         memmove(&TQ.v[0], &TQ.v[1], (size_t)(TQ.n - 1) * sizeof(TQ.v[0]));
         TQ.n--;
@@ -883,6 +897,7 @@ static void J_process_events(tl_jcall *c)
     }
     pthread_mutex_unlock(&KQ.mu);
     *(uint32_t *)addr = count;
+    if (!count) drain = false;
     if (count || (++calls % 600) == 0)
         tl_log_line("pvz2: UI_ProcessEvents call %d -> %u event(s)", calls, count);
     c->ret = vz(count != 0);

@@ -198,6 +198,15 @@ stays). A 1000 Hz mouse otherwise put 14 to 60 moves into each frame, and the se
 works per move, which on a translated x64 PC dropped it to about 40 fps (issue #36). On the Mac
 with a 1000 Hz test drag: 11002 moves reached the game before, about one per frame after.
 
+The game reads its input with `UI_ProcessEvents` in a loop until a call returns nothing, once a
+frame. Merging alone was not enough with an 8000 Hz mouse: a seed-picker move costs the game enough
+time that the next move was already queued by its next call, so the queue was empty after every
+call, nothing merged, and the loop (and the frame) went on. A reporter's laptop dropped to 31-38 fps
+in the picker at 2,400-3,000 moves a second. So each finger now gets at most one move per loop; a
+second one stops the loop's hand-out (everything behind it waits too, keeping the order) and merges
+until the next frame. On the Mac, an 8 s seed-picker drag at 8000 Hz handed out 24,531 moves inside
+a single loop (7-18 fps) before, and one move per frame at 60 fps after (also at 1000 Hz).
+
 ## Block sizes
 
 The game writes one byte past the end of a 664-byte animated object (a `PopAnimRig` at +0x10) as
