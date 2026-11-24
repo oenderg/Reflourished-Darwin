@@ -2020,6 +2020,11 @@ static NSPoint g_cursor_event_point;
 static unsigned int g_cursor_drawn_generation;
 static NSDictionary<NSString *, id> *g_cursor_art;
 static bool g_cursor_art_loading;
+static NSCache<NSString *, PVZ2CursorPose *> *g_cursor_poses;
+static NSMutableSet<NSString *> *g_cursor_pose_pending;
+static dispatch_queue_t g_cursor_art_queue;
+static NSString *g_cursor_art_path;
+static PVZ2CursorPose *g_cursor_pose;
 static void cursor_preview_tick(void);
 static void cursor_load_art(void);
 
@@ -2713,8 +2718,15 @@ static void cursor_load_art(void)
     NSString *path = [obb_dir() stringByAppendingPathComponent:name];
     if (![NSFileManager.defaultManager fileExistsAtPath:path])
         path = [bundle_dir(@"Game/obb") stringByAppendingPathComponent:name];
+    if (!g_cursor_art_queue) {
+        g_cursor_art_queue = dispatch_queue_create("pvz2.cursor-art", DISPATCH_QUEUE_SERIAL);
+        g_cursor_poses = [NSCache new];
+        g_cursor_poses.totalCostLimit = 24 * 1024 * 1024;
+        g_cursor_pose_pending = [NSMutableSet set];
+    }
+    g_cursor_art_path = path;
     double start = host_now();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(g_cursor_art_queue, ^{
         @autoreleasepool {
             NSDictionary *art = pvz2_cursor_art(path) ?: @{};
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -2728,6 +2740,32 @@ static void cursor_load_art(void)
             });
         }
     });
+}
+
+static PVZ2CursorPose *cursor_plant_pose(NSString *plant)
+{
+    PVZ2CursorPose *pose = [g_cursor_poses objectForKey:plant];
+    if (pose || !g_cursor_art_path || [g_cursor_pose_pending containsObject:plant]) return pose;
+    [g_cursor_pose_pending addObject:plant];
+    NSString *path = g_cursor_art_path;
+    double start = host_now();
+    dispatch_async(g_cursor_art_queue, ^{
+        @autoreleasepool {
+            PVZ2CursorPose *loaded = pvz2_cursor_plant_art(path, plant);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (loaded) {
+                    CGImageRef image = (__bridge CGImageRef)loaded.image;
+                    [g_cursor_poses setObject:loaded forKey:plant cost:CGImageGetBytesPerRow(image) * CGImageGetHeight(image)];
+                }
+                /* Keep failures recorded so a damaged asset is not retried every tick. */
+                if (loaded) [g_cursor_pose_pending removeObject:plant];
+                g_cursor_drawn_generation = 0;
+                tl_log_line("macos: complete cursor pose %s: %s, %.1f ms", plant.UTF8String,
+                            loaded ? "loaded" : "unavailable", (host_now() - start) * 1000);
+            });
+        }
+    });
+    return nil;
 }
 
 static void cursor_preview_tick(void)
@@ -2758,11 +2796,12 @@ static void cursor_preview_tick(void)
         g_cursor_drawn_generation = s.generation;
         g_cursor_layer.contents = nil;
         g_cursor_layer.hidden = YES;
-        NSString *key = s.kind == TL_PVZ2_CURSOR_PLANT || s.kind == TL_PVZ2_CURSOR_TOOL
+        g_cursor_pose = s.kind == TL_PVZ2_CURSOR_PLANT ? cursor_plant_pose(@(s.plant)) : nil;
+        NSString *key = s.kind == TL_PVZ2_CURSOR_TOOL
             ? [@"IMAGE_UI_PACKETS_" stringByAppendingString:[@(s.plant) uppercaseString]]
             : s.kind == TL_PVZ2_CURSOR_SHOVEL ? @"IMAGE_UI_HUD_INGAME_SHOVEL_ICON"
             : s.kind == TL_PVZ2_CURSOR_PLANT_FOOD ? @"IMAGE_UI_HUD_INGAME_PLANTFOOD_BUTTON" : nil;
-        g_cursor_layer.contents = key ? g_cursor_art[key] : nil;
+        g_cursor_layer.contents = g_cursor_pose ? g_cursor_pose.image : key ? g_cursor_art[key] : nil;
     }
     bool visible = s.live && s.kind != TL_PVZ2_CURSOR_NONE && inside && g_cursor_layer.contents;
     bool cross = false, keep_band = false;
@@ -2855,23 +2894,32 @@ static void cursor_preview_tick(void)
     }
     if (visible && s.surface_w > 0 && s.surface_h > 0) {
         CGSize size = g_view.metal.bounds.size;
-        /* The packet picture is larger than the lawn plant at a full row height. */
         double row_height = s.grid_valid ? 76.0 * s.app_scale * s.camera_scale * size.height / s.app_h
                                          : size.height * 0.14;
-        double side = row_height * 0.65;
-        double w = side, h = side, shift = 0;
-        CGImageRef art = (__bridge CGImageRef)g_cursor_layer.contents;
-        if (s.kind == TL_PVZ2_CURSOR_TOOL && art) {
-            /* A tool's picture is wider than a plant's (239x156 for a Bowling Bulb, its
-             * streaks included, against about 150 for a plant): drawn at a plant picture's
-             * scale, not fitted whole into the plant's square, with a projectile's bulb
-             * (right of centre) under the pointer. */
-            w = side * CGImageGetWidth(art) / PVZ2_PACKET_ART_SIDE;
-            h = side * CGImageGetHeight(art) / PVZ2_PACKET_ART_SIDE;
-            if (!strncmp(s.plant, "tools_projectile", 16)) shift = PVZ2_PROJECTILE_ART_SHIFT * w;
+        if (g_cursor_pose) {
+            /* The plant rig uses half-size authored animation coordinates. */
+            double scale = row_height / 76.0 * 0.5;
+            CGRect bounds = g_cursor_pose.bounds;
+            CGPoint anchor = g_cursor_pose.anchor;
+            g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w + (bounds.origin.x - anchor.x) * scale,
+                                             sy * size.height / s.surface_h + (bounds.origin.y - anchor.y) * scale,
+                                             bounds.size.width * scale, bounds.size.height * scale);
+        } else {
+            double side = row_height * 0.65;
+            double w = side, h = side, shift = 0;
+            CGImageRef art = (__bridge CGImageRef)g_cursor_layer.contents;
+            if (s.kind == TL_PVZ2_CURSOR_TOOL && art) {
+                /* A tool's picture is wider than a plant's (239x156 for a Bowling Bulb, its
+                 * streaks included, against about 150 for a plant): drawn at a plant picture's
+                 * scale, not fitted whole into the plant's square, with a projectile's bulb
+                 * (right of centre) under the pointer. */
+                w = side * CGImageGetWidth(art) / PVZ2_PACKET_ART_SIDE;
+                h = side * CGImageGetHeight(art) / PVZ2_PACKET_ART_SIDE;
+                if (!strncmp(s.plant, "tools_projectile", 16)) shift = PVZ2_PROJECTILE_ART_SHIFT * w;
+            }
+            g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - w / 2 - shift,
+                                             sy * size.height / s.surface_h - h / 2, w, h);
         }
-        g_cursor_layer.frame = CGRectMake(sx * size.width / s.surface_w - w / 2 - shift,
-                                         sy * size.height / s.surface_h - h / 2, w, h);
     }
     g_cursor_layer.hidden = !visible;
     [CATransaction commit];
